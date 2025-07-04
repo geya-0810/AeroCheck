@@ -29,7 +29,7 @@ class Baggage
 
     /**
      * Updates the screening status of the baggage.
-     * @param string $status
+     * param string $status
      */
     public function updateScreeningStatus(string $status): void
     {
@@ -39,7 +39,7 @@ class Baggage
 
     /**
      * Generates a unique baggage tag.
-     * @return string
+     * return string
      */
     public function generateBaggageTag(): string
     {
@@ -48,7 +48,7 @@ class Baggage
     
     /**
      * Gets tracking information for the baggage.
-     * @return array
+     * return array
      */
     public function getTrackingInfo(): array
     {

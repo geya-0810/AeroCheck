@@ -2,18 +2,16 @@
 
 declare(strict_types=1);
 
-// 引入依赖的类
 require_once 'Passenger.php';
-require_once 'CheckInSystem.php'; // 为了 groupCheckIn 方法的参数类型提示
-require_once 'Flight.php'; // 为了 groupCheckIn 方法的参数类型提示
-
+require_once 'CheckInSystem.php'; 
+require_once 'Flight.php'; 
 
 /**
  * Represents a group of passengers traveling together.
  */
 class Group
 {
-    /** @var Passenger[] */
+    /** var Passenger[] */
     private array $passengers = [];
 
     public function __construct(
@@ -24,11 +22,9 @@ class Group
         $this->addPassenger($representative);
     }
     
-    // --- Methods ---
-
     /**
      * Adds a passenger to the group.
-     * @param Passenger $passenger
+     * param Passenger $passenger
      */
     public function addPassenger(Passenger $passenger): void
     {
@@ -38,7 +34,7 @@ class Group
     
     /**
      * Removes a passenger from the group.
-     * @param string $passengerId
+     * param string $passengerId
      */
     public function removePassenger(string $passengerId): void
     {
@@ -60,8 +56,8 @@ class Group
     
     /**
      * Check in the entire group.
-     * @param CheckInSystem $system
-     * @param Flight $flight
+     * param CheckInSystem $system
+     * param Flight $flight
      */
     public function groupCheckIn(CheckInSystem $system, Flight $flight): void
     {
@@ -78,7 +74,7 @@ class Group
         ];
     }
     
-    /** @return Passenger[] */
+    /** return Passenger[] */
     public function getPassengers(): array
     {
         return $this->passengers;

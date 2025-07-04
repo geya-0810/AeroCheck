@@ -2,14 +2,11 @@
 
 declare(strict_types=1);
 
-// 引入依赖的类
 require_once 'Passenger.php';
 require_once 'Flight.php';
 require_once 'BoardingPass.php';
 require_once 'Group.php';
 require_once 'Baggage.php';
-require_once 'SpecialNeedsPassenger.php'; // 用于 instanceof 检查
-
 
 /**
  * Represents a self-service kiosk.
@@ -21,8 +18,6 @@ class SelfServiceKiosk
         private string $location
     ) {}
     
-    // --- Methods ---
-
     public function displayInterface(): void
     {
         echo "Welcome to Kiosk {$this->kioskId}. Please scan your passport or enter booking reference.\n";

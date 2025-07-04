@@ -2,14 +2,11 @@
 
 declare(strict_types=1);
 
-// 引入依赖的类
 require_once 'Passenger.php';
 require_once 'Flight.php';
 require_once 'BoardingPass.php';
 require_once 'Group.php';
-require_once 'SpecialNeedsPassenger.php';
 require_once 'Baggage.php';
-
 
 /**
  * The central system that orchestrates the check-in process.
@@ -24,10 +21,10 @@ class CheckInSystem
 
     /**
      * Main entry point to check in a passenger.
-     * @param Passenger $passenger
-     * @param Flight $flight
-     * @param string $seat
-     * @return BoardingPass
+     * param Passenger $passenger
+     * param Flight $flight
+     * param string $seat
+     * return BoardingPass
      */
     public function checkInPassenger(Passenger $passenger, Flight $flight, string $seat): BoardingPass
     {
@@ -41,9 +38,25 @@ class CheckInSystem
     }
 
     /**
+     * This private method is called if a passenger has special needs.
+     * It now accepts any Passenger object and performs a check inside.
+     * param Passenger $passenger
+     */
+    private function processSpecialNeeds(Passenger $passenger): void
+    {
+        $details = $passenger->getAssistanceDetails();
+        // This check is robust, as getAssistanceDetails() will only return an object if needs exist.
+        if ($details !== null) {
+            echo "System: Logging and routing special needs request for {$passenger->getName()}.\n";
+            // Update the status on the details object directly.
+            $details->updateStatus('Pending airline confirmation');
+        }
+    }
+
+    /**
      * Process check-in for a group.
-     * @param Group $group
-     * @param Flight $flight
+     * param Group $group
+     * param Flight $flight
      */
     public function processCheckInGroup(Group $group, Flight $flight): void
     {
@@ -59,20 +72,10 @@ class CheckInSystem
             }
         }
     }
-
-    /**
-     * Process a special needs request.
-     * @param SpecialNeedsPassenger $passenger
-     */
-    public function processSpecialNeeds(SpecialNeedsPassenger $passenger): void
-    {
-        echo "System: Logging and routing special needs request for {$passenger->getName()}.\n";
-        $passenger->getAssistanceDetails()->updateStatus('Pending airline confirmation');
-    }
     
     /**
      * Process baggage check-in.
-     * @param Baggage $baggage
+     * param Baggage $baggage
      */
     public function processBaggage(Baggage $baggage): void
     {
@@ -83,8 +86,8 @@ class CheckInSystem
 
     /**
      * Checks if check-in is open for a given flight.
-     * @param Flight $flight
-     * @return bool
+     * param Flight $flight
+     * return bool
      */
     public function isCheckInAvailable(Flight $flight): bool
     {

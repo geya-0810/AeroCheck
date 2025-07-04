@@ -2,7 +2,6 @@
 
 declare(strict_types=1);
 
-// 引入 Flight 类，因为 BoardingPass 类依赖它
 require_once 'Flight.php';
 
 /**
@@ -24,7 +23,7 @@ class BoardingPass
 
     /**
      * Generates a QR code string.
-     * @return string
+     * return string
      */
     public function generateQRCode(): string
     {
@@ -36,7 +35,7 @@ class BoardingPass
 
     /**
      * Generates an electronic version of the pass (e.g., a PKPass file).
-     * @return string
+     * return string
      */
     public function generateElectronicPass(): string
     {
@@ -46,7 +45,7 @@ class BoardingPass
     
     /**
      * Sends the boarding pass to a mobile number.
-     * @param string $phoneNumber
+     * param string $phoneNumber
      */
     public function sendToMobilePhoneNumber(string $phoneNumber): void
     {
