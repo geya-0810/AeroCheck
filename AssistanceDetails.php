@@ -14,11 +14,9 @@ class AssistanceDetails
         private string $status = 'Requested'
     ) {}
 
-    // --- Methods ---
-
     /**
      * Get the details of the assistance required.
-     * @return array
+     * return array
      */
     public function getDetails(): array
     {
@@ -32,7 +30,7 @@ class AssistanceDetails
 
     /**
      * Update the status of the assistance request.
-     * @param string $newStatus
+     * param string $newStatus
      */
     public function updateStatus(string $newStatus): void
     {

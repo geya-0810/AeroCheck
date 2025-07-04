@@ -2,23 +2,21 @@
 
 declare(strict_types=1);
 
-// 引入 Passenger 和 Flight 类，因为 FlightStatusNotifier 类依赖它们
 require_once 'Passenger.php';
 require_once 'Flight.php';
-
 
 /**
  * Notifier service that manages subscriptions and sends flight updates.
  */
 class FlightStatusNotifier
 {
-    /** @var Passenger[] */
+    /** var Passenger[] */
     private array $subscribers = [];
 
     /**
      * Subscribe a passenger to receive updates for a flight.
-     * @param Passenger $passenger
-     * @param string $flightNumber
+     * param Passenger $passenger
+     * param string $flightNumber
      */
     public function subscribe(Passenger $passenger, string $flightNumber): void
     {
@@ -28,8 +26,8 @@ class FlightStatusNotifier
 
     /**
      * Unsubscribe a passenger from flight updates.
-     * @param Passenger $passenger
-     * @param string $flightNumber
+     * param Passenger $passenger
+     * param string $flightNumber
      */
     public function unsubscribe(Passenger $passenger, string $flightNumber): void
     {
@@ -46,7 +44,7 @@ class FlightStatusNotifier
 
     /**
      * Notify all subscribers of a specific flight.
-     * @param Flight $flight
+     * param Flight $flight
      */
     public function notifySubscribers(Flight $flight): void
     {
@@ -63,8 +61,8 @@ class FlightStatusNotifier
 
     /**
      * Send a specific update to a passenger.
-     * @param Passenger $passenger
-     * @param Flight $flight
+     * param Passenger $passenger
+     * param Flight $flight
      */
     public function sendFlightUpdate(Passenger $passenger, Flight $flight): void
     {

@@ -2,15 +2,12 @@
 
 declare(strict_types=1);
 
-// 引入依赖的类
 require_once 'Staff.php';
 require_once 'Passenger.php';
 require_once 'Flight.php';
 require_once 'BoardingPass.php';
 require_once 'Group.php';
-require_once 'SpecialNeedsPassenger.php';
 require_once 'Baggage.php';
-
 
 /**
  * Represents a physical check-in counter.

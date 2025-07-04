@@ -2,7 +2,6 @@
 
 declare(strict_types=1);
 
-// 引入 FlightStatusNotifier 类，因为 Flight 类依赖它
 require_once 'FlightStatusNotifier.php';
 
 /**
@@ -18,12 +17,10 @@ class Flight
         private string $status = 'On Time'
     ) {}
 
-    // --- Methods ---
-
     /**
      * Updates the flight status and notifies observers.
-     * @param string $status
-     * @param FlightStatusNotifier $notifier
+     * param string $status
+     * param FlightStatusNotifier $notifier
      */
     public function updateStatus(string $status, FlightStatusNotifier $notifier): void
     {
@@ -34,7 +31,7 @@ class Flight
 
     /**
      * Gets the current details of the flight.
-     * @return array
+     * return array
      */
     public function getFlightDetails(): array
     {
@@ -49,7 +46,7 @@ class Flight
 
     /**
      * Notifies subscribers about the flight status change through the notifier.
-     * @param FlightStatusNotifier $notifier
+     * param FlightStatusNotifier $notifier
      */
     private function notifyObservers(FlightStatusNotifier $notifier): void
     {

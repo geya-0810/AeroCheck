@@ -2,14 +2,11 @@
 
 declare(strict_types=1);
 
-// 引入依赖的类
 require_once 'Passenger.php';
 require_once 'Flight.php';
 require_once 'BoardingPass.php';
 require_once 'Group.php';
-require_once 'SpecialNeedsPassenger.php';
 require_once 'Baggage.php';
-
 
 /**
  * Represents a staff member.
@@ -21,9 +18,7 @@ class Staff
         private string $name,
         private string $role
     ) {}
-    
-    // --- Methods ---
-    
+        
     /**
      * Handles the check-in for a single passenger.
      * @param Passenger $passenger
@@ -44,8 +39,8 @@ class Staff
 
     /**
      * Handles the check-in for an entire group.
-     * @param Group $group
-     * @param Flight $flight
+     * param Group $group
+     * param Flight $flight
      */
     public function processCheckInGroup(Group $group, Flight $flight): void
     {
@@ -58,7 +53,7 @@ class Staff
 
     /**
      * Assesses special needs for a passenger.
-     * @param SpecialNeedsPassenger $passenger
+     * param SpecialNeedsPassenger $passenger
      */
     public function assessSpecialNeeds(SpecialNeedsPassenger $passenger): void
     {
@@ -68,7 +63,7 @@ class Staff
 
     /**
      * Handles passenger baggage.
-     * @param Baggage $baggage
+     * param Baggage $baggage
      */
     public function handleBaggage(Baggage $baggage): void
     {

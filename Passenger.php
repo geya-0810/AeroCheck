@@ -2,12 +2,11 @@
 
 declare(strict_types=1);
 
-// 引入依赖的类
 require_once 'BoardingPass.php';
 require_once 'Baggage.php';
 require_once 'AssistanceDetails.php';
-require_once 'CheckInSystem.php'; // 为了 checkIn 方法的参数类型提示
-require_once 'Flight.php'; // 为了 checkIn 方法的参数类型提示
+require_once 'CheckInSystem.php'; 
+require_once 'Flight.php'; 
 
 
 /**
@@ -15,11 +14,17 @@ require_once 'Flight.php'; // 为了 checkIn 方法的参数类型提示
  */
 class Passenger
 {
-    /** @var BoardingPass|null */
+    /** var BoardingPass|null */
     protected ?BoardingPass $boardingPass = null;
 
-    /** @var Baggage[] */
+    /** var Baggage[] */
     protected array $baggage = [];
+
+    /** * var AssistanceDetails|null 
+     * This property holds the special needs information.
+     * If it's null, the passenger has no special needs. This replaces the boolean flag.
+     */
+    private ?AssistanceDetails $assistanceDetails = null;
     
     public function __construct(
         private string $passengerId,
@@ -27,28 +32,49 @@ class Passenger
         private string $contactInfo
     ) {}
     
-    // --- Methods ---
-
     /**
-     * Base method for requesting special assistance.
-     * Can be overridden by subclasses.
-     * @param string $needType
-     * @param string $description
-     * @return AssistanceDetails
+     * Assigns special assistance needs to this passenger.
+     * This method creates and sets the AssistanceDetails object.
+     * param string $needType e.g., "Wheelchair", "Dietary"
+     * param string $description e.g., "Requires wheelchair from check-in to gate"
      */
-    public function requestSpecialAssistance(string $needType, string $description): AssistanceDetails
+    public function requestSpecialAssistance(string $needType, string $description): void
     {
-        // This suggests that any passenger can become one with special needs.
-        // This is where the Composition over Inheritance argument is strong.
-        // For this implementation, we will create a details object.
-        return new AssistanceDetails(uniqid('assist-'), $needType, $description);
+        $this->assistanceDetails = new AssistanceDetails(
+            uniqid('assist-'), 
+            $needType, 
+            $description
+        );
+        echo "Passenger {$this->name} has requested special assistance: {$needType}.\n";
     }
     
     /**
-     * A simplified check-in method for the passenger.
-     * @param CheckInSystem $system
-     * @param Flight $flight
+     * Removes the special assistance request.
      */
+    public function cancelSpecialAssistance(): void
+    {
+        $this->assistanceDetails = null;
+        echo "Special assistance for passenger {$this->name} has been cancelled.\n";
+    }
+
+    /**
+     * Checks if the passenger has special needs.
+     * return bool
+     */
+    public function hasSpecialNeeds(): bool
+    {
+        return $this->assistanceDetails !== null;
+    }
+
+    /**
+     * Gets the assistance details object. Returns null if there are no special needs.
+     * return AssistanceDetails|null
+     */
+    public function getAssistanceDetails(): ?AssistanceDetails
+    {
+        return $this->assistanceDetails;
+    }
+
     public function checkIn(CheckInSystem $system, Flight $flight): void
     {
         echo "Passenger {$this->name} is attempting to check in.\n";
@@ -73,19 +99,8 @@ class Passenger
             'contact' => $this->contactInfo,
         ];
     }
-
-    public function getName(): string
-    {
-        return $this->name;
-    }
     
-    public function getPassengerId(): string
-    {
-        return $this->passengerId;
-    }
-    
-    public function getContactInfo(): string
-    {
-        return $this->contactInfo;
-    }
+    public function getName(): string { return $this->name; }
+    public function getPassengerId(): string { return $this->passengerId; }
+    public function getContactInfo(): string { return $this->contactInfo; }
 }
