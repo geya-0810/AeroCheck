@@ -1,12 +1,15 @@
 -- Create AeroCheck Database
-CREATE DATABASE IF NOT EXISTS `huan_fitness_pal_db`;
-USE `huan_fitness_pal_db`;
+CREATE DATABASE IF NOT EXISTS `aero_check_db`;
+USE `aero_check_db`;
 
 -- Passengers table
 CREATE TABLE IF NOT EXISTS `passengers` (
     `passenger_id` VARCHAR(50) PRIMARY KEY,
-    `name` VARCHAR(100) NOT NULL,
-    `contact_info` VARCHAR(100) NOT NULL,
+    `first_name` VARCHAR(50) NOT NULL,
+    `last_name` VARCHAR(50) NOT NULL,
+    `passport_number` VARCHAR(50) UNIQUE,
+    `contact_phone` VARCHAR(100),
+    `email_address` VARCHAR(100),
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -16,7 +19,58 @@ CREATE TABLE IF NOT EXISTS `flights` (
     `departure_time` DATETIME NOT NULL,
     `destination` VARCHAR(100) NOT NULL,
     `gate` VARCHAR(10) NOT NULL,
-    `status` VARCHAR(20) DEFAULT 'On Time'
+    `status` VARCHAR(20) DEFAULT 'On Time',
+    `capacity` INT NOT NULL DEFAULT 100
+);
+
+-- Bookings table
+CREATE TABLE IF NOT EXISTS `bookings` (
+    `booking_id` VARCHAR(50) PRIMARY KEY,
+    `flight_number` VARCHAR(20) NOT NULL,
+    `booking_date` DATETIME DEFAULT CURRENT_TIMESTAMP,
+    `status` VARCHAR(20) DEFAULT 'Confirmed',
+    `is_group_booking` BOOLEAN NOT NULL DEFAULT FALSE,
+    `fare_class` VARCHAR(50) NOT NULL DEFAULT 'Economy',
+    FOREIGN KEY (`flight_number`) REFERENCES `flights`(`flight_number`) ON DELETE CASCADE
+);
+
+-- Baggage_Packages table
+CREATE TABLE IF NOT EXISTS `baggage_packages` (
+    `package_id` VARCHAR(50) PRIMARY KEY,
+    `package_name` VARCHAR(100) NOT NULL, 
+    `additional_weight_kg` INT NOT NULL,
+    `price` DECIMAL(10,2) NOT NULL, 
+    `description` TEXT
+);
+
+-- Seats table
+CREATE TABLE IF NOT EXISTS `seats` (
+    `seat_id` VARCHAR(50) PRIMARY KEY,
+    `flight_number` VARCHAR(20) NOT NULL,
+    `seat_number` VARCHAR(10) NOT NULL, 
+    `seat_class` VARCHAR(50) NOT NULL DEFAULT 'Economy', 
+    `is_premium` BOOLEAN DEFAULT FALSE, 
+    `status` VARCHAR(20) NOT NULL DEFAULT 'Available', 
+    FOREIGN KEY (`flight_number`) REFERENCES `flights`(`flight_number`) ON DELETE CASCADE,
+    UNIQUE KEY `unique_flight_seat` (`flight_number`, `seat_number`) 
+);
+
+-- booking_Passengers table 
+CREATE TABLE IF NOT EXISTS `booking_passengers` (
+    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `booking_id` VARCHAR(50) NOT NULL,
+    `passenger_id` VARCHAR(50) NOT NULL,
+    `seat_number` VARCHAR(10),
+    `assigned_seat_id` VARCHAR(50),
+    `check_in_status` VARCHAR(20) DEFAULT 'Not Checked In',
+    `purchased_baggage_package_id` VARCHAR(50),
+    `additional_baggage_pieces` INT DEFAULT 0,
+    `additional_baggage_weight_kg` DECIMAL(5,2) DEFAULT 0.00,
+    FOREIGN KEY (`booking_id`) REFERENCES `bookings`(`booking_id`) ON DELETE CASCADE,
+    FOREIGN KEY (`passenger_id`) REFERENCES `passengers`(`passenger_id`) ON DELETE CASCADE,
+    FOREIGN KEY (`purchased_baggage_package_id`) REFERENCES `baggage_packages`(`package_id`),
+    FOREIGN KEY (`assigned_seat_id`) REFERENCES `seats`(`seat_id`),
+    UNIQUE KEY `unique_booking_passenger` (`booking_id`, `passenger_id`)
 );
 
 -- Boarding passes table
@@ -24,19 +78,21 @@ CREATE TABLE IF NOT EXISTS `boarding_passes` (
     `id` INT AUTO_INCREMENT PRIMARY KEY,
     `passenger_id` VARCHAR(50) NOT NULL,
     `flight_number` VARCHAR(20) NOT NULL,
+    `booking_id` VARCHAR(50) NOT NULL,
     `seat_number` VARCHAR(10) NOT NULL,
     `qr_code` TEXT,
     `issue_datetime` DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (`passenger_id`) REFERENCES `passengers`(`passenger_id`) ON DELETE CASCADE,
-    FOREIGN KEY (`flight_number`) REFERENCES `flights`(`flight_number`) ON DELETE CASCADE
+    FOREIGN KEY (`flight_number`) REFERENCES `flights`(`flight_number`) ON DELETE CASCADE,
+    FOREIGN KEY (`booking_id`) REFERENCES `bookings`(`booking_id`) ON DELETE CASCADE
 );
 
 -- Groups table
 CREATE TABLE IF NOT EXISTS `groups` (
     `group_id` VARCHAR(50) PRIMARY KEY,
-    `representative_id` VARCHAR(50) NOT NULL,
+    `booking_id` VARCHAR(50) NOT NULL UNIQUE,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (`representative_id`) REFERENCES `passengers`(`passenger_id`) ON DELETE CASCADE
+    FOREIGN KEY (`booking_id`) REFERENCES `bookings`(`booking_id`) ON DELETE CASCADE
 );
 
 -- Group members table
@@ -53,11 +109,13 @@ CREATE TABLE IF NOT EXISTS `group_members` (
 CREATE TABLE IF NOT EXISTS `baggage` (
     `baggage_id` VARCHAR(50) PRIMARY KEY,
     `passenger_id` VARCHAR(50) NOT NULL,
-    `weight` DECIMAL(5,2) NOT NULL,
-    `screening_status` VARCHAR(20) DEFAULT 'Pending',
+    `booking_id` VARCHAR(50) NOT NULL,
+    `weight_kg` DECIMAL(5,2) NOT NULL,
     `baggage_tag` VARCHAR(50),
+    `screening_status` VARCHAR(20) DEFAULT 'Pending',
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (`passenger_id`) REFERENCES `passengers`(`passenger_id`) ON DELETE CASCADE
+    FOREIGN KEY (`passenger_id`) REFERENCES `passengers`(`passenger_id`) ON DELETE CASCADE,
+    FOREIGN KEY (`booking_id`) REFERENCES `bookings`(`booking_id`) ON DELETE CASCADE
 );
 
 -- Assistance details table
@@ -105,30 +163,3 @@ CREATE TABLE IF NOT EXISTS `flight_notifications` (
     FOREIGN KEY (`passenger_id`) REFERENCES `passengers`(`passenger_id`) ON DELETE CASCADE,
     FOREIGN KEY (`flight_number`) REFERENCES `flights`(`flight_number`) ON DELETE CASCADE
 );
-
--- Insert sample data for testing
-INSERT INTO `passengers` (`passenger_id`, `name`, `contact_info`) VALUES
-('P001', 'John Doe', '+60123456789'),
-('P002', 'Jane Smith', '+60198765432'),
-('P003', 'Bob Johnson', '+60134567890'),
-('P004', 'Alice Brown', '+60187654321');
-
-INSERT INTO `flights` (`flight_number`, `departure_time`, `destination`, `gate`, `status`) VALUES
-('MH001', '2025-07-08 10:30:00', 'Singapore', 'A1', 'On Time'),
-('MH002', '2025-07-08 14:45:00', 'Bangkok', 'B2', 'On Time'),
-('MH003', '2025-07-08 18:20:00', 'Jakarta', 'C3', 'Delayed');
-
-INSERT INTO `staff` (`staff_id`, `name`, `role`) VALUES
-('S001', 'Mary Wilson', 'Check-in Agent'),
-('S002', 'David Lee', 'Supervisor'),
-('S003', 'Sarah Chen', 'Special Assistance Agent');
-
-INSERT INTO `checkin_counters` (`counter_id`, `location`, `assigned_staff_id`) VALUES
-('C001', 'Terminal 1 - Counter 1', 'S001'),
-('C002', 'Terminal 1 - Counter 2', 'S002'),
-('C003', 'Terminal 1 - Counter 3', 'S003');
-
-INSERT INTO `self_service_kiosks` (`kiosk_id`, `location`) VALUES
-('K001', 'Terminal 1 - Entrance'),
-('K002', 'Terminal 1 - Departure Hall'),
-('K003', 'Terminal 1 - Gate Area');
