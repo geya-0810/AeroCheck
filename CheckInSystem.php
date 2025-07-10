@@ -8,6 +8,7 @@ require_once 'BoardingPass.php';
 require_once 'Group.php';
 require_once 'Baggage.php';
 require_once 'DatabaseManager.php';
+require_once 'Booking.php';
 
 /**
  * The central system that orchestrates the check-in process with database integration.
@@ -20,6 +21,160 @@ class CheckInSystem
     {
         $this->dbManager = new DatabaseManager();
         echo "Check-In System is online and connected to database.\n";
+    }
+
+    /**
+     * Find booking by reference and last name (for self check-in)
+     */
+    public function findBooking(string $bookingRef, string $lastName): ?array
+    {
+        $booking = new Booking($bookingRef);
+        if ($booking->findBooking($lastName)) {
+            return [
+                'booking' => $booking->getBookingData(),
+                'passengers' => $booking->getPassengers(),
+                'flight' => $booking->getFlight(),
+                'availableSeats' => $booking->getAvailableSeats(),
+                'baggagePackages' => $booking->getBaggagePackages()
+            ];
+        }
+        return null;
+    }
+
+    /**
+     * Get available seats for a flight
+     */
+    public function getAvailableSeats(string $flightNumber): array
+    {
+        $conn = $this->dbManager;
+        $pdo = (new \ReflectionClass($conn))->getProperty('connection');
+        $pdo->setAccessible(true);
+        $pdo = $pdo->getValue($conn);
+        
+        $stmt = $pdo->prepare("
+            SELECT * FROM seats 
+            WHERE flight_number = ? AND status = 'Available'
+            ORDER BY seat_number
+        ");
+        $stmt->execute([$flightNumber]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /**
+     * Get baggage packages
+     */
+    public function getBaggagePackages(): array
+    {
+        $conn = $this->dbManager;
+        $pdo = (new \ReflectionClass($conn))->getProperty('connection');
+        $pdo->setAccessible(true);
+        $pdo = $pdo->getValue($conn);
+        
+        $stmt = $pdo->query("SELECT * FROM baggage_packages ORDER BY additional_weight_kg");
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /**
+     * Process self check-in for passengers
+     */
+    public function processSelfCheckIn(string $bookingRef, array $selectedPassengers, array $passengerSeats, array $baggageInfo, array $specialNeeds): bool
+    {
+        try {
+            $conn = $this->dbManager;
+            $pdo = (new \ReflectionClass($conn))->getProperty('connection');
+            $pdo->setAccessible(true);
+            $pdo = $pdo->getValue($conn);
+            
+            $pdo->beginTransaction();
+            
+            // Update passenger seats and check-in status
+            foreach ($selectedPassengers as $passengerId) {
+                $seatNumber = $passengerSeats[$passengerId] ?? null;
+                if ($seatNumber) {
+                    // Update booking_passengers table
+                    $stmt = $pdo->prepare("
+                        UPDATE booking_passengers 
+                        SET seat_number = ?, check_in_status = 'Checked In', 
+                            additional_baggage_pieces = ?, purchased_baggage_package_id = ?
+                        WHERE booking_id = ? AND passenger_id = ?
+                    ");
+                    $stmt->execute([
+                        $seatNumber,
+                        $baggageInfo['count'] ?? 0,
+                        $baggageInfo['packageId'] ?? null,
+                        $bookingRef,
+                        $passengerId
+                    ]);
+                    
+                    // Update seat status to occupied
+                    $stmt = $pdo->prepare("
+                        UPDATE seats 
+                        SET status = 'Occupied' 
+                        WHERE flight_number = (SELECT flight_number FROM bookings WHERE booking_id = ?) 
+                        AND seat_number = ?
+                    ");
+                    $stmt->execute([$bookingRef, $seatNumber]);
+                    
+                    // Create boarding pass
+                    $this->createBoardingPass($pdo, $passengerId, $bookingRef, $seatNumber);
+                }
+            }
+            
+            // Process special needs
+            if (!empty($specialNeeds['needs'])) {
+                foreach ($selectedPassengers as $passengerId) {
+                    $this->processSpecialNeedsForSelfCheckIn($pdo, $passengerId, $specialNeeds);
+                }
+            }
+            
+            $pdo->commit();
+            return true;
+            
+        } catch (Exception $e) {
+            if (isset($pdo)) {
+                $pdo->rollback();
+            }
+            error_log("Self check-in failed: " . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Create boarding pass for passenger
+     */
+    private function createBoardingPass($pdo, string $passengerId, string $bookingRef, string $seatNumber): void
+    {
+        // Get flight number from booking
+        $stmt = $pdo->prepare("SELECT flight_number FROM bookings WHERE booking_id = ?");
+        $stmt->execute([$bookingRef]);
+        $flightNumber = $stmt->fetchColumn();
+        
+        // Generate QR code (simplified)
+        $qrCode = "BP_" . $passengerId . "_" . $bookingRef . "_" . time();
+        
+        // Insert boarding pass
+        $stmt = $pdo->prepare("
+            INSERT INTO boarding_passes (passenger_id, flight_number, booking_id, seat_number, qr_code, issue_datetime)
+            VALUES (?, ?, ?, ?, ?, NOW())
+        ");
+        $stmt->execute([$passengerId, $flightNumber, $bookingRef, $seatNumber, $qrCode]);
+    }
+
+    /**
+     * Process special needs for passenger (self check-in)
+     */
+    private function processSpecialNeedsForSelfCheckIn($pdo, string $passengerId, array $specialNeeds): void
+    {
+        foreach ($specialNeeds['needs'] as $needType) {
+            $assistanceId = "ASSIST_" . $passengerId . "_" . time() . "_" . rand(1000, 9999);
+            $description = $specialNeeds['notes'] ?? "Special assistance requested: " . $needType;
+            
+            $stmt = $pdo->prepare("
+                INSERT INTO assistance_details (assistance_id, passenger_id, need_type, description, status)
+                VALUES (?, ?, ?, ?, 'Requested')
+            ");
+            $stmt->execute([$assistanceId, $passengerId, $needType, $description]);
+        }
     }
 
     /**
