@@ -21,14 +21,25 @@ class DatabaseManager
     public function savePassenger(Passenger $passenger): bool
     {
         try {
+            // Split the name into first and last name
+            $nameParts = explode(' ', $passenger->getName(), 2);
+            $firstName = isset($nameParts[0]) ? $nameParts[0] : '';
+            $lastName = isset($nameParts[1]) ? $nameParts[1] : '';
+            
             $stmt = $this->connection->prepare(
-                "INSERT INTO passengers (passenger_id, name, contact_info) VALUES (?, ?, ?)
-                 ON DUPLICATE KEY UPDATE name = VALUES(name), contact_info = VALUES(contact_info)"
+                "INSERT INTO passengers (passenger_id, first_name, last_name, passport_number, contact_phone, email_address) 
+                 VALUES (?, ?, ?, ?, ?, ?)
+                 ON DUPLICATE KEY UPDATE first_name = VALUES(first_name), last_name = VALUES(last_name), 
+                 passport_number = VALUES(passport_number), contact_phone = VALUES(contact_phone), 
+                 email_address = VALUES(email_address)"
             );
             return $stmt->execute([
                 $passenger->getPassengerId(),
-                $passenger->getName(),
-                $passenger->getContactInfo()
+                $firstName,
+                $lastName,
+                $passenger->getPassengerId(), // Using passenger_id as passport_number for now
+                $passenger->getContactInfo(),
+                '' // email_address - empty for now
             ]);
         } catch (PDOException $e) {
             echo "Error saving passenger: " . $e->getMessage() . "\n";
@@ -92,14 +103,25 @@ class DatabaseManager
     public function saveBoardingPass(BoardingPass $boardingPass, string $passengerId, string $flightNumber): bool
     {
         try {
+            // Create a booking for this passenger if it doesn't exist
+            $bookingId = 'BK' . uniqid();
             $stmt = $this->connection->prepare(
-                "INSERT INTO boarding_passes (passenger_id, flight_number, seat_number, qr_code, issue_datetime) 
-                 VALUES (?, ?, ?, ?, ?)"
+                "INSERT INTO bookings (booking_id, flight_number, booking_date, status, is_group_booking, fare_class) 
+                 VALUES (?, ?, NOW(), 'Confirmed', FALSE, 'Economy')
+                 ON DUPLICATE KEY UPDATE booking_date = NOW()"
+            );
+            $stmt->execute([$bookingId, $flightNumber]);
+            
+            // Insert boarding pass with booking_id
+            $stmt = $this->connection->prepare(
+                "INSERT INTO boarding_passes (passenger_id, flight_number, booking_id, seat_number, qr_code, issue_datetime) 
+                 VALUES (?, ?, ?, ?, ?, ?)"
             );
             return $stmt->execute([
                 $passengerId,
                 $flightNumber,
-                $this->extractSeatNumber($boardingPass), // We'll need to modify BoardingPass to expose seat number
+                $bookingId,
+                $this->extractSeatNumber($boardingPass),
                 $this->extractQRCode($boardingPass),
                 date('Y-m-d H:i:s')
             ]);
@@ -156,18 +178,27 @@ class DatabaseManager
     {
         try {
             $tracking = $baggage->getTrackingInfo();
+            $passengerId = $this->extractPassengerIdFromBaggage($baggage);
+            
+            // Get a booking_id for this passenger (create one if needed)
+            $stmt = $this->connection->prepare("SELECT booking_id FROM boarding_passes WHERE passenger_id = ? LIMIT 1");
+            $stmt->execute([$passengerId]);
+            $booking = $stmt->fetch(PDO::FETCH_ASSOC);
+            $bookingId = $booking ? $booking['booking_id'] : 'BK' . uniqid();
+            
             $stmt = $this->connection->prepare(
-                "INSERT INTO baggage (baggage_id, passenger_id, weight, screening_status, baggage_tag) 
-                 VALUES (?, ?, ?, ?, ?)
+                "INSERT INTO baggage (baggage_id, passenger_id, booking_id, weight_kg, baggage_tag, screening_status) 
+                 VALUES (?, ?, ?, ?, ?, ?)
                  ON DUPLICATE KEY UPDATE screening_status = VALUES(screening_status), 
                  baggage_tag = VALUES(baggage_tag)"
             );
             return $stmt->execute([
                 $tracking['baggageId'],
-                $this->extractPassengerIdFromBaggage($baggage),
+                $passengerId,
+                $bookingId,
                 $this->extractWeightFromBaggage($baggage),
-                $tracking['screeningStatus'],
-                $tracking['tag']
+                $tracking['tag'],
+                $tracking['screeningStatus']
             ]);
         } catch (PDOException $e) {
             echo "Error saving baggage: " . $e->getMessage() . "\n";
