@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS `flights` (
     `destination` VARCHAR(100) NOT NULL,
     `gate` VARCHAR(10) NOT NULL,
     `status` VARCHAR(20) DEFAULT 'On Time',
-    `capacity` INT NOT NULL DEFAULT 100
+    `capacity` ENUM('182', '110') NOT NULL DEFAULT '182'
 );
 
 -- Bookings table
@@ -47,12 +47,14 @@ CREATE TABLE IF NOT EXISTS `baggage_packages` (
 CREATE TABLE IF NOT EXISTS `seats` (
     `seat_id` VARCHAR(50) PRIMARY KEY,
     `flight_number` VARCHAR(20) NOT NULL,
+    `row` INT(2) NOT NULL,
+    `column` VARCHAR(1) NOT NULL,
     `seat_number` VARCHAR(10) NOT NULL, 
-    `seat_class` VARCHAR(50) NOT NULL DEFAULT 'Economy', 
+    `seat_class` ENUM('Economy', 'Business', 'First') NOT NULL DEFAULT 'Economy', 
     `is_premium` BOOLEAN DEFAULT FALSE, 
     `status` VARCHAR(20) NOT NULL DEFAULT 'Available', 
     FOREIGN KEY (`flight_number`) REFERENCES `flights`(`flight_number`) ON DELETE CASCADE,
-    UNIQUE KEY `unique_flight_seat` (`flight_number`, `seat_number`) 
+    UNIQUE KEY `unique_flight_seat` (`flight_number`, `row`, `column`) 
 );
 
 -- booking_Passengers table 
@@ -113,6 +115,8 @@ CREATE TABLE IF NOT EXISTS `baggage` (
     `weight_kg` DECIMAL(5,2) NOT NULL,
     `baggage_tag` VARCHAR(50),
     `screening_status` VARCHAR(20) DEFAULT 'Pending',
+    `special_handling` VARCHAR(20) DEFAULT NULL,
+    `package_id` VARCHAR(32) DEFAULT NULL,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (`passenger_id`) REFERENCES `passengers`(`passenger_id`) ON DELETE CASCADE,
     FOREIGN KEY (`booking_id`) REFERENCES `bookings`(`booking_id`) ON DELETE CASCADE
