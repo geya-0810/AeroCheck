@@ -113,14 +113,16 @@ CREATE TABLE IF NOT EXISTS `baggage` (
     `baggage_id` VARCHAR(50) PRIMARY KEY,
     `passenger_id` VARCHAR(50) NOT NULL,
     `booking_id` VARCHAR(50) NOT NULL,
+    `package_id` VARCHAR(50) DEFAULT NULL,
     `weight_kg` DECIMAL(5,2) NOT NULL,
     `baggage_tag` VARCHAR(50),
     `screening_status` VARCHAR(20) DEFAULT 'Pending',
-    `special_handling` VARCHAR(20) DEFAULT NULL,
-    `package_id` VARCHAR(32) DEFAULT NULL,
+    `description` TEXT AFTER `screening_status`,
+    `special_handling` VARCHAR(50) DEFAULT NULL,    
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (`passenger_id`) REFERENCES `passengers`(`passenger_id`) ON DELETE CASCADE,
-    FOREIGN KEY (`booking_id`) REFERENCES `bookings`(`booking_id`) ON DELETE CASCADE
+    FOREIGN KEY (`booking_id`) REFERENCES `bookings`(`booking_id`) ON DELETE CASCADE,
+    FOREIGN KEY (`package_id`) REFERENCES `baggage_packages`(`package_id`) ON DELETE SET NULL;
 );
 
 -- Assistance details table
