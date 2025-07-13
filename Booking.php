@@ -86,6 +86,7 @@ class Booking
      */
     public function getFlight(): ?array
     {
+        
         if (!$this->bookingData) return null;
         $flightNumber = $this->bookingData['flight_number'] ?? null;
         if (!$flightNumber) return null;
