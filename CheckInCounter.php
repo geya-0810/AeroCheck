@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-require_once 'Staff.php';
+require_once 'CheckInSystem.php';
 require_once 'Passenger.php';
 require_once 'Flight.php';
 require_once 'BoardingPass.php';
@@ -10,39 +10,57 @@ require_once 'Group.php';
 require_once 'Baggage.php';
 
 /**
- * Represents a physical check-in counter.
+ * Represents a check-in counter for staff-assisted check-in.
  */
-class CheckInCounter
+class CheckInCounter extends CheckInSystem
 {
-    public function __construct(
-        private string $counterId,
-        private string $location,
-        private Staff $assignedStaff // A counter is operated by a staff member
-    ) {}
-
-    // --- Methods (delegating to the assigned staff) ---
-
     public function checkInPassenger(Passenger $passenger, Flight $flight, string $seat): BoardingPass
     {
-        echo "Processing at Counter {$this->counterId}: \n";
-        return $this->assignedStaff->checkInPassenger($passenger, $flight, $seat);
+        $this->dbManager->savePassenger($passenger);
+        $this->dbManager->saveFlight($flight);
+        if (!$this->isCheckInAvailable($flight)) {
+            throw new \Exception("Check-in for flight {$flight->getFlightNumber()} is not available.");
+        }
+        $this->processSpecialNeeds($passenger);
+        $boardingPass = new BoardingPass($passenger->getName(), $seat, $flight, new \DateTime());
+        $this->dbManager->saveBoardingPass($boardingPass, $passenger->getPassengerId(), $flight->getFlightNumber());
+        return $boardingPass;
     }
     
-    public function checkInGroup(Group $group, Flight $flight): void
+    public function processCheckInGroup(Group $group, Flight $flight): void
     {
-        echo "Processing at Counter {$this->counterId}: \n";
-        $this->assignedStaff->processCheckInGroup($group, $flight);
-    }
-
-    public function handleSpecialNeeds(SpecialNeedsPassenger $passenger): void
-    {
-        echo "Processing at Counter {$this->counterId}: \n";
-        $this->assignedStaff->assessSpecialNeeds($passenger);
+        $this->dbManager->saveGroup($group);
+        $seatChar = 65; // 'A'
+        $seatRow = 25;
+        foreach ($group->getPassengers() as $passenger) {
+            $seat = $seatRow . chr($seatChar++);
+            $this->checkInPassenger($passenger, $flight, $seat);
+            if ($seatChar > 70) {
+                $seatChar = 65;
+                $seatRow++;
+            }
+        }
     }
     
     public function processBaggage(Baggage $baggage): void
     {
-        echo "Processing at Counter {$this->counterId}: \n";
-        $this->assignedStaff->handleBaggage($baggage);
+        $baggage->checkInBaggage();
+        $baggage->updateScreeningStatus('In Transit to Screening');
+        $this->dbManager->saveBaggage($baggage);
+    }
+    
+    public function isCheckInAvailable(Flight $flight): bool
+    {
+        $status = $flight->getFlightDetails()['status'];
+        return $status !== 'Departed' && $status !== 'Closed';
+    }
+    
+    private function processSpecialNeeds(Passenger $passenger): void
+    {
+        $details = $passenger->getAssistanceDetails();
+        if ($details !== null) {
+            $details->updateStatus('Processed by System');
+            $this->dbManager->saveAssistanceDetails($details, $passenger->getPassengerId());
+        }
     }
 }
