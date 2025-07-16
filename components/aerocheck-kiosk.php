@@ -9,7 +9,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         case 'find_booking':
             $booking_ref = strtoupper(trim($_POST['booking_ref'] ?? ''));
             $last_name = trim($_POST['last_name'] ?? '');
-            $result = $kiosk->findBooking($booking_ref, $last_name);
+            $passport_number = trim($_POST['passport_number'] ?? '');
+            $result = $kiosk->findBooking($booking_ref, $last_name, $passport_number);
             if ($result) {
                 echo json_encode(['success' => true, 'booking' => $result]);
             } else {
@@ -27,16 +28,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             echo json_encode(['success' => true, 'seats' => $seats]);
             exit;
         case 'process_checkin':
-            $bookingRef = $_POST['booking_ref'] ?? '';
-            $selectedPassengers = isset($_POST['selected_passengers']) ? json_decode($_POST['selected_passengers'], true) : [];
-            $passengerSeats = isset($_POST['passenger_seats']) ? json_decode($_POST['passenger_seats'], true) : [];
-            $baggageInfo = isset($_POST['baggage_info']) ? json_decode($_POST['baggage_info'], true) : [];
-            $specialNeeds = isset($_POST['special_needs']) ? json_decode($_POST['special_needs'], true) : [];
-            $success = $kiosk->processSelfCheckIn($bookingRef, $selectedPassengers, $passengerSeats, $baggageInfo, $specialNeeds);
-            if ($success) {
-                echo json_encode(['success' => true, 'message' => 'Check-in successful']);
-            } else {
-                echo json_encode(['success' => false, 'message' => 'Check-in failed, please try again']);
+            // 开启错误显示以便调试
+            ini_set('display_errors', 1);
+            ini_set('display_startup_errors', 1);
+            error_reporting(E_ALL);
+            
+            try {
+                $bookingRef = $_POST['booking_ref'] ?? '';
+                $selectedPassengers = isset($_POST['selected_passengers']) ? json_decode($_POST['selected_passengers'], true) : [];
+                $passengerSeats = isset($_POST['passenger_seats']) ? json_decode($_POST['passenger_seats'], true) : [];
+                $baggageInfo = isset($_POST['baggage_info']) ? json_decode($_POST['baggage_info'], true) : [];
+                $specialNeeds = isset($_POST['special_needs']) ? json_decode($_POST['special_needs'], true) : [];
+                
+                // 验证必要参数
+                if (empty($bookingRef) || empty($selectedPassengers)) {
+                    echo json_encode(['success' => false, 'message' => 'Missing required parameters']);
+                    exit;
+                }
+                
+                $success = $kiosk->processSelfCheckIn($bookingRef, $selectedPassengers, $passengerSeats, $baggageInfo, $specialNeeds);
+                if ($success) {
+                    echo json_encode(['success' => true, 'message' => 'Check-in successful']);
+                } else {
+                    echo json_encode(['success' => false, 'message' => 'Check-in failed, please try again']);
+                }
+            } catch (Exception $e) {
+                error_log("Check-in error: " . $e->getMessage());
+                echo json_encode(['success' => false, 'message' => 'System error: ' . $e->getMessage()]);
             }
             exit;
         case 'get_baggage_packages':
@@ -51,7 +69,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title><?php echo htmlspecialchars($kiosk_config['title']); ?></title>
+    <title>AeroCheck Self Check-in System</title>
     <link rel="stylesheet" href="aerocheck-kiosk.css">
 </head>
 
@@ -84,11 +102,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     </h2>
                     <div class="form-group">
                         <label for="bookingRef">Please enter your Booking Reference</label>
-                        <input type="text" id="bookingRef" placeholder="" class="booking-ref-input">
+                        <input type="text" id="bookingRef" placeholder="Booking Reference" class="booking-ref-input">
                     </div>
                     <div class="form-group">
                         <label for="lastName">Please enter your Last Name</label>
                         <input type="text" id="lastName" placeholder="Last Name">
+                    </div>
+                    <!-- or分界线和护照号输入框 -->
+                    <div class="or-divider">
+                        <span>or</span>
+                    </div>
+                    <div class="form-group">
+                        <label for="passportNumber">Please enter your Passport Number</label>
+                        <input type="text" id="passportNumber" placeholder="Passport Number">
                     </div>
                     <div class="form-actions">
                         <button class="btn btn-primary btn-large" onclick="findBooking()">
@@ -133,7 +159,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                         <div><strong>Items:</strong> <span id="baggageCountDisplay">0</span></div>
                     </div>
                     <div class="baggage-form-group">
-                        <label>Please select baggage package:</label>
+                        <label>Please select additional baggage package:</label>
                         <div class="baggage-package-container">
                         <div class="baggage-package-select-wrapper">
                             <select id="baggagePackageSelect" class="baggage-package-select"></select>
@@ -310,16 +336,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     function findBooking() {
         const bookingRef = document.getElementById('bookingRef').value.toUpperCase();
         const lastName = document.getElementById('lastName').value;
+        const passportNumber = document.getElementById('passportNumber').value;
         const errorDiv = document.getElementById('errorMessage');
         errorDiv.classList.remove('error-visible');
-        if (!bookingRef || !lastName) {
-            showError('Please enter complete information');
+
+        // 只要passport number有值，允许查找，否则必须bookingRef和lastName都有
+        if (passportNumber) {
+            // 允许
+        } else if (bookingRef && lastName) {
+            // 允许
+        } else {
+            showError('Please enter Booking Reference and Last Name, or enter Passport Number only');
             return;
         }
+
         const formData = new FormData();
         formData.append('action', 'find_booking');
         formData.append('booking_ref', bookingRef);
         formData.append('last_name', lastName);
+        formData.append('passport_number', passportNumber);
         fetch('', { method: 'POST', body: formData })
             .then(response => response.json())
             .then(data => {
@@ -874,7 +909,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     otherInfo.className = "review-item";
     otherInfo.innerHTML = `
       <h4>Other Information</h4>
-      <p><strong>Baggage Package:</strong> ${baggageInfo.packageName || "N/A"}</p>
+      <p><strong>Baggage Package:</strong> ${baggageInfo.packageName || "None"}</p>
       <p><strong>Special Needs:</strong> ${
         specialNeedsData.hasSpecialNeeds ? specialNeedsData.needs.join(", ") : "None"
       }</p>
@@ -1014,6 +1049,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     // Clear forms
     document.getElementById("bookingRef").value = "";
     document.getElementById("lastName").value = "";
+    document.getElementById("passportNumber").value = "";
     document.getElementById("mobileNumber").value = "";
     document.getElementById("specialNotes").value = "";
 
@@ -1122,7 +1158,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
       special_handling: item.handling && item.handling !== 'None' ? item.handling : null
     }));
     const pkgSelect = document.getElementById('baggagePackageSelect');
-    if (pkgSelect && pkgSelect.value) {
+    if (baggageInfo.count === 0) {
+      baggageInfo.packageName = '';
+      baggageInfo.packageId = '';
+    } else if (pkgSelect && pkgSelect.value) {
       const pkg = baggagePackages.find(p => p.package_id === pkgSelect.value);
       baggageInfo.packageName = pkg ? pkg.package_name : '';
       baggageInfo.packageId = pkgSelect.value;

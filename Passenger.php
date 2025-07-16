@@ -58,11 +58,13 @@ class Passenger
         if (!$data) {
             return null;
         }
-        
+        // 拼接姓名和联系方式
+        $name = trim(($data['first_name'] ?? '') . ' ' . ($data['last_name'] ?? ''));
+        $contact = $data['contact_phone'] ?? '';
         return new self(
             $data['passenger_id'],
-            $data['name'],
-            $data['contact_info']
+            $name,
+            $contact
         );
     }
     

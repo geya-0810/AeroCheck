@@ -15,11 +15,9 @@ class Group
     private array $passengers = [];
 
     public function __construct(
-        private string $groupId,
-        private Passenger $representative
+        private string $groupId
     ) {
-        // The representative is also part of the group.
-        $this->addPassenger($representative);
+        // Group starts empty, passengers are added separately
     }
     
     /**
@@ -39,19 +37,18 @@ class Group
     public function removePassenger(string $passengerId): void
     {
         if (isset($this->passengers[$passengerId])) {
-            // Cannot remove the representative without assigning a new one.
-            if ($this->representative->getPassengerId() === $passengerId) {
-                echo "Cannot remove the group representative.\n";
-                return;
-            }
             unset($this->passengers[$passengerId]);
             echo "Passenger with ID {$passengerId} removed from group {$this->groupId}.\n";
         }
     }
 
-    public function getRepresentative(): Passenger
+    /**
+     * Gets the first passenger as representative (if any passengers exist).
+     * return Passenger|null
+     */
+    public function getRepresentative(): ?Passenger
     {
-        return $this->representative;
+        return !empty($this->passengers) ? reset($this->passengers) : null;
     }
     
     /**
@@ -67,9 +64,10 @@ class Group
 
     public function getGroupDetails(): array
     {
+        $representative = $this->getRepresentative();
         return [
             'groupId' => $this->groupId,
-            'representative' => $this->representative->getName(),
+            'representative' => $representative ? $representative->getName() : 'No representative',
             'member_count' => count($this->passengers)
         ];
     }

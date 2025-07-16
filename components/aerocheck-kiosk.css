@@ -639,7 +639,7 @@ body {
 }
 
 .booking-ref-input {
-  text-transform: uppercase;
+  text-transform: none;
 }
 
 .form-actions {
@@ -873,4 +873,28 @@ body {
 
 .send-message-visible {
   display: block;
+}
+
+.or-divider {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 10px 0 20px 0;
+  width: 100%;
+}
+.or-divider span {
+  font-size: 1.1rem;
+  color: #888;
+  background: #fff;
+  padding: 0 16px;
+  border-radius: 20px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.03);
+  letter-spacing: 2px;
+}
+.or-divider::before,
+.or-divider::after {
+  content: "";
+  flex: 1;
+  border-bottom: 1.5px solid #d1d5db;
+  margin: 0 8px;
 }

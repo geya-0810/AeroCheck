@@ -22,9 +22,8 @@ class CheckInCounter extends CheckInSystem
             throw new \Exception("Check-in for flight {$flight->getFlightNumber()} is not available.");
         }
         $this->processSpecialNeeds($passenger);
-        $boardingPass = new BoardingPass($passenger->getName(), $seat, $flight, new \DateTime());
-        $this->dbManager->saveBoardingPass($boardingPass, $passenger->getPassengerId(), $flight->getFlightNumber());
-        return $boardingPass;
+        // 统一调用父类方法生成登机牌
+        return $this->createBoardingPass($passenger, $flight, $seat);
     }
     
     public function processCheckInGroup(Group $group, Flight $flight): void
