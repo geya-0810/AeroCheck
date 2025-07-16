@@ -71,6 +71,118 @@ try {
 // Handle AJAX booking search
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['search_booking'])) {
     try {
+        $passportNumber = $_POST['passport_number'] ?? '';
+        if (!empty($passportNumber)) {
+            // Find the passenger by passport number
+            $stmtP = $dbconnect->prepare("SELECT passenger_id FROM passengers WHERE passport_number = ? LIMIT 1");
+            $stmtP->execute([$passportNumber]);
+            $rowP = $stmtP->fetch(PDO::FETCH_ASSOC);
+            if ($rowP && $rowP['passenger_id']) {
+                $passengerId = $rowP['passenger_id'];
+                // Check if this passenger is in a group
+                $stmtGroup = $dbconnect->prepare("SELECT gm.group_id, g.booking_id as group_booking_id FROM group_members gm JOIN groups g ON gm.group_id = g.group_id WHERE gm.passenger_id = ? LIMIT 1");
+                $stmtGroup->execute([$passengerId]);
+                $groupRow = $stmtGroup->fetch(PDO::FETCH_ASSOC);
+                if ($groupRow && $groupRow['group_id']) {
+                    // Get all group members
+                    $groupId = $groupRow['group_id'];
+                    $stmtMembers = $dbconnect->prepare("SELECT passenger_id FROM group_members WHERE group_id = ?");
+                    $stmtMembers->execute([$groupId]);
+                    $allPassengerIds = $stmtMembers->fetchAll(PDO::FETCH_COLUMN);
+                    if (count($allPassengerIds) > 0) {
+                        // Get all bookings for these passengers for the same flight(s) as the group booking
+                        $stmtGroupBooking = $dbconnect->prepare("SELECT flight_number FROM bookings WHERE booking_id = ? LIMIT 1");
+                        $stmtGroupBooking->execute([$groupRow['group_booking_id']]);
+                        $groupFlightRow = $stmtGroupBooking->fetch(PDO::FETCH_ASSOC);
+                        $groupFlightNumber = $groupFlightRow ? $groupFlightRow['flight_number'] : null;
+                        $inClause = implode(',', array_fill(0, count($allPassengerIds), '?'));
+                        $query = "
+                            SELECT 
+                                b.booking_id,
+                                b.flight_number,
+                                p.passenger_id,
+                                p.first_name,
+                                p.last_name,
+                                p.passport_number,
+                                CONCAT(p.first_name, ' ', p.last_name) as passenger_name,
+                                bp.check_in_status
+                            FROM bookings b
+                            JOIN booking_passengers bp ON b.booking_id = bp.booking_id
+                            JOIN passengers p ON bp.passenger_id = p.passenger_id
+                            WHERE p.passenger_id IN ($inClause) ";
+                        if ($groupFlightNumber) {
+                            $query .= "AND b.flight_number = ? ";
+                        }
+                        $query .= "ORDER BY b.booking_id, b.flight_number, p.last_name, p.first_name";
+                        $params = $allPassengerIds;
+                        if ($groupFlightNumber) $params[] = $groupFlightNumber;
+                        $stmt = $dbconnect->prepare($query);
+                        $stmt->execute($params);
+                        $passengers = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                    } else {
+                        $passengers = [];
+                    }
+                } else {
+                    // Not in a group, show only this passenger's bookings
+                    $stmt = $dbconnect->prepare("
+                        SELECT 
+                            b.booking_id,
+                            b.flight_number,
+                            p.passenger_id,
+                            p.first_name,
+                            p.last_name,
+                            p.passport_number,
+                            CONCAT(p.first_name, ' ', p.last_name) as passenger_name,
+                            bp.check_in_status
+                        FROM passengers p
+                        JOIN booking_passengers bp ON p.passenger_id = bp.passenger_id
+                        JOIN bookings b ON bp.booking_id = b.booking_id
+                        WHERE p.passport_number = ?
+                        ORDER BY b.booking_id, b.flight_number, p.last_name, p.first_name
+                    ");
+                    $stmt->execute([$passportNumber]);
+                    $passengers = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                }
+                if ($passengers && count($passengers) > 0) {
+                    $flightNumber = $passengers[0]['flight_number'];
+                    $flightInfo = [
+                        'flight_number' => $flightNumber,
+                        'destination' => '',
+                        'departure_time' => '',
+                        'gate' => ''
+                    ];
+                    $stmtFlight = $dbconnect->prepare("SELECT flight_number, destination, departure_time, gate FROM flights WHERE flight_number = ? LIMIT 1");
+                    if ($stmtFlight->execute([$flightNumber])) {
+                        $row = $stmtFlight->fetch(PDO::FETCH_ASSOC);
+                        if ($row) {
+                            $flightInfo = $row;
+                        }
+                    }
+                    header('Content-Type: application/json');
+                    echo json_encode([
+                        'success' => true,
+                        'booking_id' => $passengers[0]['booking_id'],
+                        'flight_number' => $flightNumber,
+                        'flight_info' => $flightInfo,
+                        'passengers' => $passengers
+                    ]);
+                } else {
+                    header('Content-Type: application/json');
+                    echo json_encode([
+                        'success' => false,
+                        'message' => 'No passenger found with this passport number.'
+                    ]);
+                }
+                exit;
+            } else {
+                header('Content-Type: application/json');
+                echo json_encode([
+                    'success' => false,
+                    'message' => 'No passenger found with this passport number.'
+                ]);
+                exit;
+            }
+        }
         $bookingId = $_POST['booking_id'] ?? '';
         $lastName = $_POST['last_name'] ?? '';
         if ($bookingId) {
@@ -102,27 +214,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['search_booking'])) {
                 $passengers = $stmt->fetchAll(PDO::FETCH_ASSOC);
             } else {
                 // Not a group booking, search for all passengers in booking
-                $stmt = $dbconnect->prepare("
-                    SELECT 
-                        b.booking_id,
-                        b.flight_number,
-                        p.passenger_id,
-                        p.first_name,
-                        p.last_name,
-                        CONCAT(p.first_name, ' ', p.last_name) as passenger_name,
-                        bp.check_in_status
-                    FROM bookings b
-                    JOIN booking_passengers bp ON b.booking_id = bp.booking_id
-                    JOIN passengers p ON bp.passenger_id = p.passenger_id
-                    WHERE b.booking_id = ? " . ($lastName ? "AND p.last_name = ?" : "") . "
-                    ORDER BY p.last_name, p.first_name
-                ");
-                if ($lastName) {
-                    $stmt->execute([$bookingId, $lastName]);
-                } else {
-                    $stmt->execute([$bookingId]);
-                }
-                $passengers = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            $stmt = $dbconnect->prepare("
+                SELECT 
+                    b.booking_id,
+                    b.flight_number,
+                    p.passenger_id,
+                    p.first_name,
+                    p.last_name,
+                    CONCAT(p.first_name, ' ', p.last_name) as passenger_name,
+                    bp.check_in_status
+                FROM bookings b
+                JOIN booking_passengers bp ON b.booking_id = bp.booking_id
+                JOIN passengers p ON bp.passenger_id = p.passenger_id
+                WHERE b.booking_id = ? " . ($lastName ? "AND p.last_name = ?" : "") . "
+                ORDER BY p.last_name, p.first_name
+            ");
+            if ($lastName) {
+                $stmt->execute([$bookingId, $lastName]);
+            } else {
+                $stmt->execute([$bookingId]);
+            }
+            $passengers = $stmt->fetchAll(PDO::FETCH_ASSOC);
             }
             if ($passengers && count($passengers) > 0) {
                 // Fetch flight details
@@ -176,12 +288,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['search_booking'])) {
 
 // 1. Refactor batch_check_in handler to only assign seats and return assignments, do NOT update check-in status or create boarding passes
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['batch_check_in'])) {
+    // Debug: Log the entire $_POST and passenger_ids to error_log
+    error_log('DEBUG batch_check_in $_POST: ' . print_r($_POST, true));
     $bookingId = $_POST['booking_id'] ?? '';
-    $passengerIds = $_POST['passenger_ids'] ?? [];
+    $passengerIds = isset($_POST['passenger_ids']) ? (array)$_POST['passenger_ids'] : [];
+    error_log('DEBUG batch_check_in passengerIds: ' . print_r($passengerIds, true));
     $assignedSeats = [];
     if ($bookingId && is_array($passengerIds) && count($passengerIds) > 0) {
         $stmt = $dbconnect->prepare("
-            SELECT p.passenger_id, p.first_name, p.last_name, b.flight_number, b.fare_class
+            SELECT p.passenger_id, p.passport_number, p.first_name, p.last_name, b.flight_number, b.fare_class
             FROM bookings b
             JOIN booking_passengers bp ON b.booking_id = bp.booking_id
             JOIN passengers p ON bp.passenger_id = p.passenger_id
@@ -227,8 +342,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['batch_check_in'])) {
                 // Mark as checked in immediately after seat assignment
                 $stmtCheckIn = $dbconnect->prepare("UPDATE booking_passengers SET check_in_status = 'Checked In' WHERE booking_id = ? AND passenger_id = ?");
                 $stmtCheckIn->execute([$bookingId, $pid]);
+                // Generate boarding pass immediately
+                $stmtBP = $dbconnect->prepare("INSERT INTO boarding_passes (passenger_id, flight_number, booking_id, seat_number, issue_datetime) VALUES (?, ?, ?, ?, NOW()) ON DUPLICATE KEY UPDATE seat_number = VALUES(seat_number)");
+                $stmtBP->execute([$pid, $flightNumber, $bookingId, $assignedSeat['seat_number']]);
                 $assignedSeats[] = [
                     'passenger_id' => $pid,
+                    'passport_number' => $pdata['passport_number'],
                     'seat_number' => $assignedSeat['seat_number'],
                     'seat_class' => $assignedSeat['seat_class'],
                     'passenger_name' => $pdata['first_name'] . ' ' . $pdata['last_name']
@@ -375,7 +494,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 
                 if (!$firstPassengerId) {
-                    $errorMessage = "❌ Please provide at least one valid passenger ID for baggage check-in.";
+                    $errorMessage = "❌ Please provide at least one valid passport number for baggage check-in.";
                 } else {
                     $stmt = $dbconnect->prepare("SELECT booking_id FROM booking_passengers WHERE passenger_id = ? LIMIT 1");
                     $stmt->execute([$firstPassengerId]);
@@ -494,19 +613,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 // ... existing code ...
 // Handle special needs submission
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_special_needs'])) {
-    $ids = $_POST['special_passenger_id'] ?? [];
+    $passports = $_POST['special_passenger_id'] ?? [];
     $types = $_POST['special_need_type'] ?? [];
     $descs = $_POST['special_need_desc'] ?? [];
     $successCount = 0;
-    for ($i = 0; $i < count($ids); $i++) {
-        $pid = trim($ids[$i] ?? '');
+    for ($i = 0; $i < count($passports); $i++) {
+        $passport = trim($passports[$i] ?? '');
         $type = trim($types[$i] ?? '');
         $desc = trim($descs[$i] ?? '');
-        if ($pid && $type) {
-            $assistanceId = uniqid('ASST');
-            $stmt = $dbconnect->prepare("INSERT INTO assistance_details (assistance_id, passenger_id, need_type, description, status) VALUES (?, ?, ?, ?, 'Requested')");
-            if ($stmt->execute([$assistanceId, $pid, $type, $desc])) {
-                $successCount++;
+        if ($passport && $type) {
+            // Look up passenger_id from passport_number
+            $stmtLookup = $dbconnect->prepare("SELECT passenger_id FROM passengers WHERE passport_number = ? LIMIT 1");
+            $stmtLookup->execute([$passport]);
+            $row = $stmtLookup->fetch(PDO::FETCH_ASSOC);
+            if ($row && isset($row['passenger_id'])) {
+                $pid = $row['passenger_id'];
+                $assistanceId = uniqid('ASST');
+                $stmt = $dbconnect->prepare("INSERT INTO assistance_details (assistance_id, passenger_id, need_type, description, status) VALUES (?, ?, ?, ?, 'Requested')");
+                if ($stmt->execute([$assistanceId, $pid, $type, $desc])) {
+                    $successCount++;
+                }
+            } else {
+                // Optionally log or handle the case where the passport number is not found
+                error_log("Special needs submission: Passport number '$passport' not found in passengers table.");
             }
         }
     }
@@ -523,18 +652,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_special_needs'
 // Handle final check-in after special needs step
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['finalize_special_needs_checkin'])) {
     // Save special needs if any
-    $ids = $_POST['special_passenger_id'] ?? [];
+    $passports = $_POST['passport_number'] ?? [];
     $types = $_POST['special_need_type'] ?? [];
     $descs = $_POST['special_need_desc'] ?? [];
     $specialSuccess = 0;
-    for ($i = 0; $i < count($ids); $i++) {
-        $pid = trim($ids[$i] ?? '');
+    // Debug: log the arrays being processed
+    error_log('Passports: ' . print_r($passports, true));
+    error_log('Types: ' . print_r($types, true));
+    error_log('Descs: ' . print_r($descs, true));
+    for ($i = 0; $i < count($passports); $i++) {
+        $passport = trim($passports[$i] ?? '');
         $type = trim($types[$i] ?? '');
         $desc = trim($descs[$i] ?? '');
-        if ($pid && $type) {
-            $stmt = $dbconnect->prepare("INSERT INTO assistance_details (passenger_id, need_type, description, status) VALUES (?, ?, ?, 'Requested')");
-            if ($stmt->execute([$pid, $type, $desc])) {
+        // Debug: log each passport being processed
+        error_log("Processing special needs for passport: '$passport'");
+        if ($passport && $type) {
+            // Look up passenger_id from passport number
+            $stmtLookup = $dbconnect->prepare("SELECT passenger_id FROM passengers WHERE passport_number = ? LIMIT 1");
+            $stmtLookup->execute([$passport]);
+            $row = $stmtLookup->fetch(PDO::FETCH_ASSOC);
+            if ($row && isset($row['passenger_id'])) {
+                error_log("Found passenger_id: {$row['passenger_id']} for passport: '$passport'");
+                $pid = $row['passenger_id'];
+                $assistanceId = uniqid('ASST');
+                $stmt = $dbconnect->prepare("INSERT INTO assistance_details (assistance_id, passenger_id, need_type, description, status) VALUES (?, ?, ?, ?, 'Requested')");
+                if ($stmt->execute([$assistanceId, $pid, $type, $desc])) {
                 $specialSuccess++;
+                }
+            } else {
+                error_log("NOT FOUND: Passport number '$passport' not found in passengers table.");
             }
         }
     }
@@ -1002,23 +1148,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['finalize_special_need
             <div class="card-title">Passenger Check-In</div>
         </div>
         <form id="passengerCheckInTableForm" onsubmit="return false;">
+            <table style="width:100%; margin-bottom: 1rem;">
+                <tr>
+                    <td colspan="5" style="padding: 0.75rem;">
+                        <label><input type="radio" name="search_method" id="search_by_booking" value="booking" checked onchange="toggleSearchMethod()"> Search by Booking ID & Last Name</label>
+                        &nbsp;&nbsp;
+                        <label><input type="radio" name="search_method" id="search_by_passport" value="passport" onchange="toggleSearchMethod()"> Search by Passport Number</label>
+                    </td>
+                </tr>
+            </table>
             <table id="passengerCheckInTable" style="width:100%; border-collapse:collapse; background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.04);">
                 <thead>
                     <tr style="background: #f3f4f6;">
-                        <th style="text-align:left; padding: 0.75rem;">Booking ID</th>
-                        <th style="text-align:left; padding: 0.75rem;">Passenger's Last Name</th>
+                        <th style="text-align:left; padding: 0.75rem;" id="th_booking_id">Booking ID</th>
+                        <th style="text-align:left; padding: 0.75rem;" id="th_last_name">Passenger's Last Name</th>
+                        <th style="text-align:left; padding: 0.75rem;" id="th_passport_number">Passport Number</th>
                         <th style="text-align:left; padding: 0.75rem;">Action</th>
                         <th style="text-align:left; padding: 0.75rem;">&nbsp;</th>
                     </tr>
                 </thead>
                 <tbody id="passengerCheckInTableBody">
                     <tr>
-                        <td style="padding: 0.75rem;">
-                            <input type="text" class="form-input" name="booking_id" id="booking_id" placeholder="Enter booking ID (e.g., BKG001)" required style="width: 100%;">
+                        <td style="padding: 0.75rem;" id="booking_id_cell">
+                            <input type="text" class="form-input" name="booking_id" id="booking_id" placeholder="Enter booking ID (e.g., BKG001)" style="width: 100%;">
                             <small style="color: #6b7280; font-size: 0.875rem;">Enter the booking reference number to search</small>
                         </td>
-                        <td style="padding: 0.75rem;">
-                            <input type="text" class="form-input" name="last_name" id="last_name" placeholder="Enter passenger's last name (optional)" style="width: 100%;">
+                        <td style="padding: 0.75rem;" id="last_name_cell">
+                            <input type="text" class="form-input" name="last_name" id="last_name" placeholder="Enter passenger's last name " style="width: 100%;">
+                        </td>
+                        <td style="padding: 0.75rem;" id="passport_number_cell">
+                            <input type="text" class="form-input" name="passport_number" id="passport_number" placeholder="Enter passport number " style="width: 100%;">
                         </td>
                         <td style="padding: 0.75rem;">
                             <button type="button" onclick="searchBookingData(); return false;" class="btn btn-primary">
@@ -1033,6 +1192,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['finalize_special_need
         </form>
         <!-- Add a container for seat assignment summary below the passenger check-in table -->
         <div id="seatAssignmentSummary" style="display:none; margin-top:2rem;"></div>
+        <div style="margin-top: 1rem;">
+        </div>
             </div>
 
     <!-- Baggage Handling Panel -->
@@ -1084,9 +1245,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['finalize_special_need
                                    placeholder="Weight" required style="margin: 0;">
                         </div>
                         <div>
-                            <label style="font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem; display: block;">Passenger ID</label>
-                            <input type="text" class="form-input" name="baggage_passenger_ids[]" 
-                                   placeholder="Enter passenger ID" style="margin: 0;">
+                            <label style="font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem; display: block;">Passport Number</label>
+                            <input type="text" class="form-input" name="baggage_passenger_ids[]" placeholder="Enter passport number" style="margin: 0;">
                         </div>
                         <div>
                             <label style="font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem; display: block;">Special Handling</label>
@@ -1122,7 +1282,63 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['finalize_special_need
         <button type="button" onclick="showSummaryModal(); return false;" class="btn btn-info" id="viewSummaryBtn" style="margin-top: 1rem; margin-left: 0.5rem;" disabled>
             <i class="fas fa-list"></i> View Summary
         </button>
+        <div style="margin-top: 1rem; display: inline-block;">
+            <button type="button" id="confirmCheckInBtn" class="btn btn-success" style="min-width:180px; margin-left: 0.5rem;" disabled>
+                <i class="fas fa-user-check"></i> Confirm Check-In
+            </button>
+        </div>
 
+        <div class="card" style="margin-top:2rem;">
+    <div class="card-header">
+        <div class="card-icon search-icon">
+            <i class="fas fa-wheelchair"></i>
+        </div>
+        <div class="card-title">Passenger Special Needs</div>
+    </div>
+    <form id="specialNeedsInputForm" onsubmit="submitSpecialNeedsInput(event); return false;">
+        <table style="width:100%; border-collapse:collapse; background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.04);">
+            <thead>
+                <tr style="background: #f3f4f6;">
+                    <th style="text-align:left; padding: 0.75rem;">Passport Number</th>
+                    <th style="text-align:left; padding: 0.75rem;">Special Need Type</th>
+                    <th style="text-align:left; padding: 0.75rem;">Description (Optional)</th>
+                    <th style="text-align:left; padding: 0.75rem;">Action</th>
+                </tr>
+            </thead>
+            <tbody id="specialNeedsInputTableBody">
+                <tr>
+                    <td style="padding: 0.75rem;">
+                        <input type="text" class="form-input" name="special_passenger_id[]" placeholder="Passport Number" required="">
+                    </td>
+                    <td style="padding: 0.75rem;">
+                        <select class="form-select" name="special_need_type[]" required="">
+                            <option value="">Select</option>
+                            <option value="Wheelchair">Wheelchair</option>
+                            <option value="Visual Assistance">Visual Assistance</option>
+                            <option value="Hearing Assistance">Hearing Assistance</option>
+                            <option value="Medical">Medical</option>
+                            <option value="Other">Other</option>
+                        </select>
+                    </td>
+                    <td style="padding: 0.75rem;">
+                        <input type="text" class="form-input" name="special_need_desc[]" placeholder="Description (optional)">
+                    </td>
+                    <td style="padding: 0.75rem;">
+                        <button type="button" class="btn btn-secondary" onclick="removeSpecialNeedsInputRow(this); return false;">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+        <button type="button" class="btn btn-secondary" onclick="addSpecialNeedsInputRow(event); return false;" style="margin-top: 0.5rem;">
+            <i class="fas fa-plus"></i> Add Another Special Need
+        </button>
+        <button type="submit" class="btn btn-primary" id="specialNeedsInputSubmitBtn" style="margin-top: 1rem;">
+            <i class="fas fa-check"></i> Submit
+        </button>
+    </form>
+</div>
     </div>
             </div>
 
@@ -1141,6 +1357,11 @@ function showNotification(message, type) {
 
 // --- Passenger Checklist Rendering ---
 function renderPassengerChecklist(passengers, bookingId, flightInfo) {
+    const bookingIdInput = document.getElementById('booking_id');
+    if (bookingIdInput && bookingId) {
+        bookingIdInput.value = bookingId;
+        console.log('DEBUG (renderPassengerChecklist) booking_id input value set to:', bookingIdInput.value);
+    }
     const tableBody = document.getElementById('passengerCheckInTableBody');
     while (tableBody.rows.length > 1) tableBody.deleteRow(1);
     // Show flight details if available
@@ -1173,7 +1394,7 @@ function renderPassengerChecklist(passengers, bookingId, flightInfo) {
         row.innerHTML = `
             <td style='padding: 0.75rem;'><input type='checkbox' name='passenger_ids[]' value='${p.passenger_id}' ${p.check_in_status === 'Checked In' ? 'disabled checked' : ''}></td>
             <td style='padding: 0.75rem;'>${p.passenger_name}</td>
-            <td style='padding: 0.75rem;'>${p.passenger_id}</td>
+            <td style='padding: 0.75rem;'>${p.passport_number || ''}</td>
             <td style='padding: 0.75rem;'>${p.check_in_status}</td>
         `;
     });
@@ -1185,26 +1406,33 @@ function renderPassengerChecklist(passengers, bookingId, flightInfo) {
 function searchBookingData() {
     const bookingIdInput = document.getElementById('booking_id');
     const lastNameInput = document.getElementById('last_name');
+    const passportInput = document.getElementById('passport_number');
+    const byBooking = document.getElementById('search_by_booking').checked;
     const bookingId = bookingIdInput.value.trim();
     const lastName = lastNameInput.value.trim();
+    const passportNumber = passportInput.value.trim();
+    if (byBooking) {
     if (bookingId) {
         bookingIdInput.style.borderColor = '#fbbf24';
         bookingIdInput.style.backgroundColor = '#fef3c7';
         const formData = new FormData();
         formData.append('search_booking', '1');
         formData.append('booking_id', bookingId);
-        // Always append last_name, even if empty
-        formData.append('last_name', lastName);
+            formData.append('last_name', lastName);
         fetch('StaffUI.php', {
             method: 'POST',
             body: formData
         })
         .then(response => response.json())
         .then(data => {
-            console.log('Booking search AJAX response:', data); // Debug: log AJAX response
-            const summaryBtn = document.getElementById('viewSummaryBtn');
-            if (data.success && data.passengers && data.passengers.length > 0) {
+                console.log('Booking search AJAX response:', data); // Debug: log AJAX response
+                const summaryBtn = document.getElementById('viewSummaryBtn');
+                if (data.success && data.passengers && data.passengers.length > 0) {
                 if (lastNameInput && !lastName) lastNameInput.value = data.passengers[0].last_name;
+                    if (bookingIdInput && data.booking_id) {
+                        bookingIdInput.value = data.booking_id;
+                        console.log('DEBUG booking_id input value set to:', bookingIdInput.value);
+                    }
                 bookingIdInput.style.borderColor = '#10b981';
                 bookingIdInput.style.backgroundColor = '#d1fae5';
                 if (lastNameInput) {
@@ -1214,18 +1442,18 @@ function searchBookingData() {
                 showNotification(`✅ Booking found: ${data.passengers.length} passenger(s)`, 'success');
                 // Store flight info globally for summary
                 window.currentFlightInfo = data.flight_info || {};
-                window.lastBookingPassengers = data.passengers || [];
-                window.lastBookingFlightInfo = data.flight_info || {};
-                console.log('Set globals:', window.currentFlightInfo, window.lastBookingFlightInfo, window.lastBookingPassengers);
-                // Enable the summary button
-                if (summaryBtn) summaryBtn.disabled = false;
+                    window.lastBookingPassengers = data.passengers || [];
+                    window.lastBookingFlightInfo = data.flight_info || {};
+                    console.log('Set globals:', window.currentFlightInfo, window.lastBookingFlightInfo, window.lastBookingPassengers);
+                    // Enable the summary button
+                    if (summaryBtn) summaryBtn.disabled = false;
                 // Pass flight info if available
                 renderPassengerChecklist(data.passengers, data.booking_id, data.flight_info || {
                     flight_number: data.flight_number
                 });
             } else {
-                // Disable the summary button if search fails or no passengers
-                if (summaryBtn) summaryBtn.disabled = true;
+                    // Disable the summary button if search fails or no passengers
+                    if (summaryBtn) summaryBtn.disabled = true;
                 bookingIdInput.style.borderColor = '#ef4444';
                 bookingIdInput.style.backgroundColor = '#fee2e2';
                 if (lastNameInput) {
@@ -1254,6 +1482,72 @@ function searchBookingData() {
             lastNameInput.style.backgroundColor = '#ffffff';
         }
         renderPassengerChecklist([], '', null);
+        }
+    } else {
+        if (passportNumber) {
+            bookingIdInput.style.borderColor = '#e5e7eb';
+            bookingIdInput.style.backgroundColor = '#ffffff';
+            lastNameInput.style.borderColor = '#e5e7eb';
+            lastNameInput.style.backgroundColor = '#ffffff';
+            const formData = new FormData();
+            formData.append('search_booking', '1');
+            formData.append('passport_number', passportNumber);
+            fetch('StaffUI.php', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                console.log('Booking search AJAX response:', data); // Debug: log AJAX response
+                const summaryBtn = document.getElementById('viewSummaryBtn');
+                if (data.success && data.passengers && data.passengers.length > 0) {
+                    if (lastNameInput && !lastName) lastNameInput.value = data.passengers[0].last_name;
+                    bookingIdInput.style.borderColor = '#10b981';
+                    bookingIdInput.style.backgroundColor = '#d1fae5';
+                    if (lastNameInput) {
+                        lastNameInput.style.borderColor = '#10b981';
+                        lastNameInput.style.backgroundColor = '#d1fae5';
+                    }
+                    showNotification(`✅ Booking found: ${data.passengers.length} passenger(s)`, 'success');
+                    // Store flight info globally for summary
+                    window.currentFlightInfo = data.flight_info || {};
+                    window.lastBookingPassengers = data.passengers || [];
+                    window.lastBookingFlightInfo = data.flight_info || {};
+                    console.log('Set globals:', window.currentFlightInfo, window.lastBookingFlightInfo, window.lastBookingPassengers);
+                    // Enable the summary button
+                    if (summaryBtn) summaryBtn.disabled = false;
+                    // Pass flight info if available
+                    renderPassengerChecklist(data.passengers, data.booking_id, data.flight_info || {
+                        flight_number: data.flight_number
+                    });
+                } else {
+                    // Disable the summary button if search fails or no passengers
+                    if (summaryBtn) summaryBtn.disabled = true;
+                    bookingIdInput.style.borderColor = '#ef4444';
+                    bookingIdInput.style.backgroundColor = '#fee2e2';
+                    if (lastNameInput) {
+                        lastNameInput.style.borderColor = '#ef4444';
+                        lastNameInput.style.backgroundColor = '#fee2e2';
+                    }
+                    showNotification(`❌ ${data.message || 'Booking not found'}`, 'error');
+                    renderPassengerChecklist([], '', null);
+                }
+            })
+            .catch(error => {
+                bookingIdInput.style.borderColor = '#ef4444';
+                bookingIdInput.style.backgroundColor = '#fee2e2';
+                if (lastNameInput) {
+                    lastNameInput.style.borderColor = '#ef4444';
+                    lastNameInput.style.backgroundColor = '#fee2e2';
+                }
+                showNotification('❌ Error searching booking data', 'error');
+                renderPassengerChecklist([], '', null);
+            });
+        } else {
+            passportInput.style.borderColor = '#e5e7eb';
+            passportInput.style.backgroundColor = '#ffffff';
+            renderPassengerChecklist([], '', null);
+        }
     }
 }
 
@@ -1262,7 +1556,22 @@ function submitBatchCheckIn(event) {
     event.preventDefault();
     const form = document.getElementById('passengerCheckInTableForm');
     const formData = new FormData(form);
+    // Debug: log selected passenger IDs
+    console.log('Selected passenger_ids:', formData.getAll('passenger_ids[]'));
+    // Debug: log booking_id value from input
+    const bookingIdInput = document.getElementById('booking_id');
+    if (bookingIdInput) {
+        console.log('DEBUG booking_id input value before submit:', bookingIdInput.value);
+    } else {
+        console.log('DEBUG booking_id input not found');
+    }
     formData.append('batch_check_in', '1');
+    // Ensure booking_id is always included and up-to-date
+    let bookingId = '';
+    if (bookingIdInput) {
+        bookingId = bookingIdInput.value.trim();
+    }
+    formData.set('booking_id', bookingId); // set (overwrite) to ensure it's present
     fetch('StaffUI.php', {
         method: 'POST',
         body: formData
@@ -1273,11 +1582,14 @@ function submitBatchCheckIn(event) {
             showNotification(`✅ Seat assignment successful for ${data.assignedSeats.length} passenger(s).`, 'success');
             if (data.assignedSeats && data.assignedSeats.length > 0) {
                 renderSeatAssignmentSummary(data.assignedSeats, {});
-                // Show baggage entry form for these passengers
-                showBaggageEntryForm(data.assignedSeats);
+                // Show baggage entry form for these passengers, pass group members for dropdown
+                showBaggageEntryForm(data.assignedSeats, window.lastBookingPassengers);
                 // Store seat assignment summary globally for summary modal
                 window.seatAssignmentSummary = data.assignedSeats;
             }
+            // Disable confirm check-in button until baggage is checked in
+            let confirmBtn = document.getElementById('confirmCheckInBtn');
+            if (confirmBtn) confirmBtn.disabled = true;
         } else {
             showNotification(`❌ ${data.message || 'Seat assignment failed.'}`, 'error');
             document.getElementById('seatAssignmentSummary').style.display = 'none';
@@ -1290,13 +1602,15 @@ function submitBatchCheckIn(event) {
 }
 
 // Show baggage entry form for selected passengers
-function showBaggageEntryForm(assignedSeats) {
+function showBaggageEntryForm(assignedSeats, groupMembers) {
+    // Only include checked-in group members in the dropdown
+    const checkedInMembers = (groupMembers || []).filter(m => m.check_in_status === 'Checked In');
     window.selectedCheckInPassengers = assignedSeats.map(p => p.passenger_id);
     document.querySelector('.card .card-title').textContent = 'Baggage Check-In for Selected Passengers';
     const container = document.getElementById('baggage_items_container');
-    container.innerHTML = ''; // Clear previous items
+    container.innerHTML = '';
 
-    assignedSeats.forEach(p => {
+    assignedSeats.forEach(() => {
         const div = document.createElement('div');
         div.className = 'baggage-item';
         div.style = 'border: 1px solid #e5e7eb; border-radius: 8px; padding: 1rem; margin-bottom: 1rem;';
@@ -1307,8 +1621,8 @@ function showBaggageEntryForm(assignedSeats) {
                     <input type="number" step="0.1" class="form-input" name="baggage_weights[]" placeholder="Weight" required style="margin: 0;">
             </div>
                 <div>
-                    <label style="font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem; display: block;">Passenger ID</label>
-                    <input type="text" class="form-input" name="baggage_passenger_ids[]" value="${p.passenger_id}" readonly style="margin: 0; background: #f3f4f6;">
+                    <label style="font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem; display: block;">Passport Number</label>
+                    <input type="text" class="form-input" name="baggage_passenger_ids[]" placeholder="Enter passport number" style="margin: 0;">
                 </div>
                 <div>
                     <label style="font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem; display: block;">Special Handling</label>
@@ -1424,7 +1738,7 @@ function submitMultipleBaggageCheckIn(event) {
             }
             // Enable confirm check-in button
             let confirmBtn = document.getElementById('confirmCheckInBtn');
-            if (confirmBtn) confirmBtn.style.display = '';
+            if (confirmBtn) confirmBtn.disabled = false;
         } else {
             showNotification(`❌ ${data.message || 'Baggage check-in failed.'}`, 'error');
             document.getElementById('baggage_summary').style.display = 'none';
@@ -1558,7 +1872,7 @@ function renderSeatAssignmentSummary(assignments, nameMap) {
             <table style="width:100%; border-collapse:collapse; background:#fff; border-radius:8px;">
                 <thead>
                     <tr style="background:#f3f4f6;">
-                        <th style="text-align:left; padding:0.75rem;">Passenger ID</th>
+                        <th style="text-align:left; padding:0.75rem;">Passport Number</th>
                         <th style="text-align:left; padding:0.75rem;">Name</th>
                         <th style="text-align:left; padding:0.75rem;">Seat Number</th>
                         <th style="text-align:left; padding:0.75rem;">Seat Class</th>
@@ -1567,7 +1881,7 @@ function renderSeatAssignmentSummary(assignments, nameMap) {
                 <tbody>`;
     assignments.forEach(a => {
         html += `<tr>
-            <td style="padding:0.75rem;">${a.passenger_id}</td>
+            <td style="padding:0.75rem;">${a.passport_number}</td>
             <td style="padding:0.75rem;">${a.passenger_name || (nameMap[a.passenger_id] || '')}</td>
             <td style="padding:0.75rem;">${a.seat_number}</td>
             <td style="padding:0.75rem;">${a.seat_class}</td>
@@ -1665,7 +1979,7 @@ function showSummaryModal() {
             html += `<div style="background:#f3f4f6; border-radius:8px; padding:0.7rem; margin-bottom:0.5rem;">
                 <div><b>Name:</b> ${a.passenger_name || '-'}<\/div>
                 <div><b>Seat:</b> ${a.seat_number || '-'}<\/div>
-                <div><b>ID:</b> ${a.passenger_id || '-'}<\/div>`;
+                <div><b>Passport Number:</b> ${a.passport_number || '-'}<\/div>`;
             // Add baggage details for this passenger
             const passengerBaggage = baggage.filter(b => b.passenger_id === a.passenger_id);
             if (passengerBaggage.length > 0) {
@@ -1689,6 +2003,7 @@ function showSummaryModal() {
                 <div><b>Passenger:</b> ${sn.passenger_id}</div>
                 <div><b>Type:</b> ${sn.type}</div>
                 <div><b>Description:</b> ${sn.desc || '-'}</div>
+                <div><b>Passport Number:</b> ${sn.passport_number || '-'}</div>
             </div>`;
         });
         html += `</div>`;
@@ -1765,6 +2080,11 @@ if (isset($_GET['ajax'])) {
 
 <script>
 function renderPassengerChecklist(passengers, bookingId, flightInfo) {
+    const bookingIdInput = document.getElementById('booking_id');
+    if (bookingIdInput && bookingId) {
+        bookingIdInput.value = bookingId;
+        console.log('DEBUG (renderPassengerChecklist) booking_id input value set to:', bookingIdInput.value);
+    }
     const tableBody = document.getElementById('passengerCheckInTableBody');
     while (tableBody.rows.length > 1) tableBody.deleteRow(1);
     // Show flight details if available
@@ -1797,7 +2117,7 @@ function renderPassengerChecklist(passengers, bookingId, flightInfo) {
         row.innerHTML = `
             <td style='padding: 0.75rem;'><input type='checkbox' name='passenger_ids[]' value='${p.passenger_id}' ${p.check_in_status === 'Checked In' ? 'disabled checked' : ''}></td>
             <td style='padding: 0.75rem;'>${p.passenger_name}</td>
-            <td style='padding: 0.75rem;'>${p.passenger_id}</td>
+            <td style='padding: 0.75rem;'>${p.passport_number || ''}</td>
             <td style='padding: 0.75rem;'>${p.check_in_status}</td>
         `;
     });
@@ -1809,25 +2129,28 @@ function searchBookingData() {
     console.log('searchBookingData loaded');
     const bookingIdInput = document.getElementById('booking_id');
     const lastNameInput = document.getElementById('last_name');
+    const passportInput = document.getElementById('passport_number');
+    const byBooking = document.getElementById('search_by_booking').checked;
     const bookingId = bookingIdInput.value.trim();
     const lastName = lastNameInput.value.trim();
+    const passportNumber = passportInput.value.trim();
+    if (byBooking) {
     if (bookingId) {
         bookingIdInput.style.borderColor = '#fbbf24';
         bookingIdInput.style.backgroundColor = '#fef3c7';
         const formData = new FormData();
         formData.append('search_booking', '1');
         formData.append('booking_id', bookingId);
-        // Always append last_name, even if empty
-        formData.append('last_name', lastName);
+            formData.append('last_name', lastName);
         fetch('StaffUI.php', {
             method: 'POST',
             body: formData
         })
         .then(response => response.json())
         .then(data => {
-            console.log('Booking search AJAX response:', data); // Debug: log AJAX response
-            const summaryBtn = document.getElementById('viewSummaryBtn');
-            if (data.success && data.passengers && data.passengers.length > 0) {
+                console.log('Booking search AJAX response:', data); // Debug: log AJAX response
+                const summaryBtn = document.getElementById('viewSummaryBtn');
+                if (data.success && data.passengers && data.passengers.length > 0) {
                 if (lastNameInput && !lastName) lastNameInput.value = data.passengers[0].last_name;
                 bookingIdInput.style.borderColor = '#10b981';
                 bookingIdInput.style.backgroundColor = '#d1fae5';
@@ -1836,20 +2159,20 @@ function searchBookingData() {
                     lastNameInput.style.backgroundColor = '#d1fae5';
                 }
                 showNotification(`✅ Booking found: ${data.passengers.length} passenger(s)`, 'success');
-                // Store flight info globally for summary
-                window.currentFlightInfo = data.flight_info || {};
-                window.lastBookingPassengers = data.passengers || [];
-                window.lastBookingFlightInfo = data.flight_info || {};
-                console.log('Set globals:', window.currentFlightInfo, window.lastBookingFlightInfo, window.lastBookingPassengers);
-                // Enable the summary button
-                if (summaryBtn) summaryBtn.disabled = false;
+                    // Store flight info globally for summary
+                    window.currentFlightInfo = data.flight_info || {};
+                    window.lastBookingPassengers = data.passengers || [];
+                    window.lastBookingFlightInfo = data.flight_info || {};
+                    console.log('Set globals:', window.currentFlightInfo, window.lastBookingFlightInfo, window.lastBookingPassengers);
+                    // Enable the summary button
+                    if (summaryBtn) summaryBtn.disabled = false;
                 // Pass flight info if available
                 renderPassengerChecklist(data.passengers, data.booking_id, data.flight_info || {
                     flight_number: data.flight_number
                 });
             } else {
-                // Disable the summary button if search fails or no passengers
-                if (summaryBtn) summaryBtn.disabled = true;
+                    // Disable the summary button if search fails or no passengers
+                    if (summaryBtn) summaryBtn.disabled = true;
                 bookingIdInput.style.borderColor = '#ef4444';
                 bookingIdInput.style.backgroundColor = '#fee2e2';
                 if (lastNameInput) {
@@ -1878,6 +2201,72 @@ function searchBookingData() {
             lastNameInput.style.backgroundColor = '#ffffff';
         }
         renderPassengerChecklist([], '', null);
+        }
+    } else {
+        if (passportNumber) {
+            bookingIdInput.style.borderColor = '#e5e7eb';
+            bookingIdInput.style.backgroundColor = '#ffffff';
+            lastNameInput.style.borderColor = '#e5e7eb';
+            lastNameInput.style.backgroundColor = '#ffffff';
+            const formData = new FormData();
+            formData.append('search_booking', '1');
+            formData.append('passport_number', passportNumber);
+            fetch('StaffUI.php', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                console.log('Booking search AJAX response:', data); // Debug: log AJAX response
+                const summaryBtn = document.getElementById('viewSummaryBtn');
+                if (data.success && data.passengers && data.passengers.length > 0) {
+                    if (lastNameInput && !lastName) lastNameInput.value = data.passengers[0].last_name;
+                    bookingIdInput.style.borderColor = '#10b981';
+                    bookingIdInput.style.backgroundColor = '#d1fae5';
+                    if (lastNameInput) {
+                        lastNameInput.style.borderColor = '#10b981';
+                        lastNameInput.style.backgroundColor = '#d1fae5';
+                    }
+                    showNotification(`✅ Booking found: ${data.passengers.length} passenger(s)`, 'success');
+                    // Store flight info globally for summary
+                    window.currentFlightInfo = data.flight_info || {};
+                    window.lastBookingPassengers = data.passengers || [];
+                    window.lastBookingFlightInfo = data.flight_info || {};
+                    console.log('Set globals:', window.currentFlightInfo, window.lastBookingFlightInfo, window.lastBookingPassengers);
+                    // Enable the summary button
+                    if (summaryBtn) summaryBtn.disabled = false;
+                    // Pass flight info if available
+                    renderPassengerChecklist(data.passengers, data.booking_id, data.flight_info || {
+                        flight_number: data.flight_number
+                    });
+                } else {
+                    // Disable the summary button if search fails or no passengers
+                    if (summaryBtn) summaryBtn.disabled = true;
+                    bookingIdInput.style.borderColor = '#ef4444';
+                    bookingIdInput.style.backgroundColor = '#fee2e2';
+                    if (lastNameInput) {
+                        lastNameInput.style.borderColor = '#ef4444';
+                        lastNameInput.style.backgroundColor = '#fee2e2';
+                    }
+                    showNotification(`❌ ${data.message || 'Booking not found'}`, 'error');
+                    renderPassengerChecklist([], '', null);
+                }
+            })
+            .catch(error => {
+                bookingIdInput.style.borderColor = '#ef4444';
+                bookingIdInput.style.backgroundColor = '#fee2e2';
+                if (lastNameInput) {
+                    lastNameInput.style.borderColor = '#ef4444';
+                    lastNameInput.style.backgroundColor = '#fee2e2';
+                }
+                showNotification('❌ Error searching booking data', 'error');
+                renderPassengerChecklist([], '', null);
+            });
+        } else {
+            passportInput.style.borderColor = '#e5e7eb';
+            passportInput.style.backgroundColor = '#ffffff';
+            renderPassengerChecklist([], '', null);
+        }
     }
 }
 
@@ -1885,7 +2274,22 @@ function submitBatchCheckIn(event) {
     event.preventDefault();
     const form = document.getElementById('passengerCheckInTableForm');
     const formData = new FormData(form);
+    // Debug: log selected passenger IDs
+    console.log('Selected passenger_ids:', formData.getAll('passenger_ids[]'));
+    // Debug: log booking_id value from input
+    const bookingIdInput = document.getElementById('booking_id');
+    if (bookingIdInput) {
+        console.log('DEBUG booking_id input value before submit:', bookingIdInput.value);
+    } else {
+        console.log('DEBUG booking_id input not found');
+    }
     formData.append('batch_check_in', '1');
+    // Ensure booking_id is always included and up-to-date
+    let bookingId = '';
+    if (bookingIdInput) {
+        bookingId = bookingIdInput.value.trim();
+    }
+    formData.set('booking_id', bookingId); // set (overwrite) to ensure it's present
     fetch('StaffUI.php', {
         method: 'POST',
         body: formData
@@ -1896,11 +2300,14 @@ function submitBatchCheckIn(event) {
             showNotification(`✅ Seat assignment successful for ${data.assignedSeats.length} passenger(s).`, 'success');
             if (data.assignedSeats && data.assignedSeats.length > 0) {
                 renderSeatAssignmentSummary(data.assignedSeats, {});
-                // Show baggage entry form for these passengers
-                showBaggageEntryForm(data.assignedSeats);
+                // Show baggage entry form for these passengers, pass group members for dropdown
+                showBaggageEntryForm(data.assignedSeats, window.lastBookingPassengers);
                 // Store seat assignment summary globally for summary modal
                 window.seatAssignmentSummary = data.assignedSeats;
             }
+            // Disable confirm check-in button until baggage is checked in
+            let confirmBtn = document.getElementById('confirmCheckInBtn');
+            if (confirmBtn) confirmBtn.disabled = true;
         } else {
             showNotification(`❌ ${data.message || 'Seat assignment failed.'}`, 'error');
             document.getElementById('seatAssignmentSummary').style.display = 'none';
@@ -1928,7 +2335,7 @@ function renderSeatAssignmentSummary(assignments, nameMap) {
             <table style="width:100%; border-collapse:collapse; background:#fff; border-radius:8px;">
                 <thead>
                     <tr style="background:#f3f4f6;">
-                        <th style="text-align:left; padding:0.75rem;">Passenger ID</th>
+                        <th style="text-align:left; padding:0.75rem;">Passport Number</th>
                         <th style="text-align:left; padding:0.75rem;">Name</th>
                         <th style="text-align:left; padding:0.75rem;">Seat Number</th>
                         <th style="text-align:left; padding:0.75rem;">Seat Class</th>
@@ -1937,7 +2344,7 @@ function renderSeatAssignmentSummary(assignments, nameMap) {
                 <tbody>`;
     assignments.forEach(a => {
         html += `<tr>
-            <td style="padding:0.75rem;">${a.passenger_id}</td>
+            <td style="padding:0.75rem;">${a.passport_number}</td>
             <td style="padding:0.75rem;">${a.passenger_name || (nameMap[a.passenger_id] || '')}</td>
             <td style="padding:0.75rem;">${a.seat_number}</td>
             <td style="padding:0.75rem;">${a.seat_class}</td>
@@ -2009,18 +2416,35 @@ function removeSpecialNeedsRow(btn) {
 // Handle final check-in after special needs step
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['finalize_special_needs_checkin'])) {
     // Save special needs if any
-    $ids = $_POST['special_passenger_id'] ?? [];
+    $passports = $_POST['passport_number'] ?? [];
     $types = $_POST['special_need_type'] ?? [];
     $descs = $_POST['special_need_desc'] ?? [];
     $specialSuccess = 0;
-    for ($i = 0; $i < count($ids); $i++) {
-        $pid = trim($ids[$i] ?? '');
+    // Debug: log the arrays being processed
+    error_log('Passports: ' . print_r($passports, true));
+    error_log('Types: ' . print_r($types, true));
+    error_log('Descs: ' . print_r($descs, true));
+    for ($i = 0; $i < count($passports); $i++) {
+        $passport = trim($passports[$i] ?? '');
         $type = trim($types[$i] ?? '');
         $desc = trim($descs[$i] ?? '');
-        if ($pid && $type) {
-            $stmt = $dbconnect->prepare("INSERT INTO assistance_details (passenger_id, need_type, description, status) VALUES (?, ?, ?, 'Requested')");
-            if ($stmt->execute([$pid, $type, $desc])) {
+        // Debug: log each passport being processed
+        error_log("Processing special needs for passport: '$passport'");
+        if ($passport && $type) {
+            // Look up passenger_id from passport number
+            $stmtLookup = $dbconnect->prepare("SELECT passenger_id FROM passengers WHERE passport_number = ? LIMIT 1");
+            $stmtLookup->execute([$passport]);
+            $row = $stmtLookup->fetch(PDO::FETCH_ASSOC);
+            if ($row && isset($row['passenger_id'])) {
+                error_log("Found passenger_id: {$row['passenger_id']} for passport: '$passport'");
+                $pid = $row['passenger_id'];
+                $assistanceId = uniqid('ASST');
+                $stmt = $dbconnect->prepare("INSERT INTO assistance_details (assistance_id, passenger_id, need_type, description, status) VALUES (?, ?, ?, ?, 'Requested')");
+                if ($stmt->execute([$assistanceId, $pid, $type, $desc])) {
                 $specialSuccess++;
+                }
+            } else {
+                error_log("NOT FOUND: Passport number '$passport' not found in passengers table.");
             }
         }
     }
@@ -2052,60 +2476,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['finalize_special_need
     ]);
     exit;
 }
+// ... existing code ...
 ?>
-
-<!-- Special Needs Input Table -->
-<div class="card" style="margin-top:2rem;">
-    <div class="card-header">
-        <div class="card-icon search-icon">
-            <i class="fas fa-wheelchair"></i>
-        </div>
-        <div class="card-title">Passenger Special Needs</div>
-    </div>
-    <form id="specialNeedsInputForm" onsubmit="submitSpecialNeedsInput(event); return false;">
-        <table style="width:100%; border-collapse:collapse; background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.04);">
-            <thead>
-                <tr style="background: #f3f4f6;">
-                    <th style="text-align:left; padding: 0.75rem;">Passenger ID</th>
-                    <th style="text-align:left; padding: 0.75rem;">Special Need Type</th>
-                    <th style="text-align:left; padding: 0.75rem;">Description (Optional)</th>
-                    <th style="text-align:left; padding: 0.75rem;">Action</th>
-                </tr>
-            </thead>
-            <tbody id="specialNeedsInputTableBody">
-                <tr>
-                    <td style="padding: 0.75rem;">
-                        <input type="text" class="form-input" name="special_passenger_id[]" placeholder="Passenger ID" required>
-                    </td>
-                    <td style="padding: 0.75rem;">
-                        <select class="form-select" name="special_need_type[]" required>
-                            <option value="">Select</option>
-                            <option value="Wheelchair">Wheelchair</option>
-                            <option value="Visual Assistance">Visual Assistance</option>
-                            <option value="Hearing Assistance">Hearing Assistance</option>
-                            <option value="Medical">Medical</option>
-                            <option value="Other">Other</option>
-                        </select>
-                    </td>
-                    <td style="padding: 0.75rem;">
-                        <input type="text" class="form-input" name="special_need_desc[]" placeholder="Description (optional)">
-                    </td>
-                    <td style="padding: 0.75rem;">
-                        <button type="button" class="btn btn-secondary" onclick="removeSpecialNeedsInputRow(this); return false;">
-                            <i class="fas fa-trash"></i>
-                        </button>
-                    </td>
-                </tr>
-            </tbody>
-        </table>
-        <button type="button" class="btn btn-secondary" onclick="addSpecialNeedsInputRow(event); return false;" style="margin-top: 0.5rem;">
-            <i class="fas fa-plus"></i> Add Another Special Need
-        </button>
-        <button type="submit" class="btn btn-primary" id="specialNeedsInputSubmitBtn" style="margin-top: 1rem;">
-            <i class="fas fa-check"></i> Submit
-        </button>
-    </form>
-</div>
 
 <script>
 function addSpecialNeedsInputRow(event) {
@@ -2149,6 +2521,33 @@ function submitSpecialNeedsInput(event) {
         showNotification('Error submitting special needs.', 'error');
     });
 }
+</script>
+
+<script>
+function toggleSearchMethod() {
+    const byBooking = document.getElementById('search_by_booking').checked;
+    // Show/hide booking and last name fields
+    document.getElementById('booking_id_cell').style.display = byBooking ? '' : 'none';
+    document.getElementById('last_name_cell').style.display = byBooking ? '' : 'none';
+    // Show/hide passport number field
+    document.getElementById('passport_number_cell').style.display = byBooking ? 'none' : '';
+    // Show/hide table headers
+    document.getElementById('th_booking_id').style.display = byBooking ? '' : 'none';
+    document.getElementById('th_last_name').style.display = byBooking ? '' : 'none';
+    document.getElementById('th_passport_number').style.display = byBooking ? 'none' : '';
+    // Remove required attribute from booking_id always
+    document.getElementById('booking_id').removeAttribute('required');
+    // Optionally clear the hidden fields
+    if (byBooking) {
+        document.getElementById('passport_number').value = '';
+    } else {
+        document.getElementById('booking_id').value = '';
+        document.getElementById('last_name').value = '';
+    }
+}
+document.addEventListener('DOMContentLoaded', function() {
+    toggleSearchMethod();
+});
 </script>
 
 </body>

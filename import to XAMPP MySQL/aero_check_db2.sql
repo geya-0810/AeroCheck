@@ -117,12 +117,12 @@ CREATE TABLE IF NOT EXISTS `baggage` (
     `weight_kg` DECIMAL(5,2) NOT NULL,
     `baggage_tag` VARCHAR(50),
     `screening_status` VARCHAR(20) DEFAULT 'Pending',
-    `description` TEXT AFTER `screening_status`,
+    `description` TEXT,
     `special_handling` VARCHAR(50) DEFAULT NULL,    
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (`passenger_id`) REFERENCES `passengers`(`passenger_id`) ON DELETE CASCADE,
     FOREIGN KEY (`booking_id`) REFERENCES `bookings`(`booking_id`) ON DELETE CASCADE,
-    FOREIGN KEY (`package_id`) REFERENCES `baggage_packages`(`package_id`) ON DELETE SET NULL;
+    FOREIGN KEY (`package_id`) REFERENCES `baggage_packages`(`package_id`) ON DELETE SET NULL
 );
 
 -- Assistance details table
