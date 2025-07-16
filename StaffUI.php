@@ -101,8 +101,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['search_booking'])) {
                                 b.booking_id,
                                 b.flight_number,
                                 p.passenger_id,
-                                p.first_name,
-                                p.last_name,
                                 p.passport_number,
                                 CONCAT(p.first_name, ' ', p.last_name) as passenger_name,
                                 bp.check_in_status
@@ -129,8 +127,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['search_booking'])) {
                             b.booking_id,
                             b.flight_number,
                             p.passenger_id,
-                            p.first_name,
-                            p.last_name,
                             p.passport_number,
                             CONCAT(p.first_name, ' ', p.last_name) as passenger_name,
                             bp.check_in_status
@@ -196,6 +192,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['search_booking'])) {
                 $query = "
                     SELECT 
                         gm.passenger_id,
+                        p.passport_number,
                         p.first_name,
                         p.last_name,
                         CONCAT(p.first_name, ' ', p.last_name) as passenger_name,
@@ -219,8 +216,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['search_booking'])) {
                     b.booking_id,
                     b.flight_number,
                     p.passenger_id,
-                    p.first_name,
-                    p.last_name,
+                    p.passport_number,
                     CONCAT(p.first_name, ' ', p.last_name) as passenger_name,
                     bp.check_in_status
                 FROM bookings b
@@ -1583,8 +1579,25 @@ function submitBatchCheckIn(event) {
             if (data.assignedSeats && data.assignedSeats.length > 0) {
                 renderSeatAssignmentSummary(data.assignedSeats, {});
                 // Show baggage entry form for these passengers, pass group members for dropdown
-                showBaggageEntryForm(data.assignedSeats, window.lastBookingPassengers);
-                // Store seat assignment summary globally for summary modal
+                // Instead of using old window.lastBookingPassengers, re-fetch booking data to update checked-in statuses
+                const bookingIdInput = document.getElementById('booking_id');
+                const bookingId = bookingIdInput ? bookingIdInput.value.trim() : '';
+                if (bookingId) {
+                    const formData = new FormData();
+                    formData.append('search_booking', '1');
+                    formData.append('booking_id', bookingId);
+                    fetch('StaffUI.php', {
+                        method: 'POST',
+                        body: formData
+                    })
+                    .then(response => response.json())
+                    .then(searchData => {
+                        window.lastBookingPassengers = searchData.passengers || [];
+                        showBaggageEntryForm(data.assignedSeats, window.lastBookingPassengers);
+                    });
+                } else {
+                    showBaggageEntryForm(data.assignedSeats, window.lastBookingPassengers);
+                }
                 window.seatAssignmentSummary = data.assignedSeats;
             }
             // Disable confirm check-in button until baggage is checked in
@@ -1603,26 +1616,39 @@ function submitBatchCheckIn(event) {
 
 // Show baggage entry form for selected passengers
 function showBaggageEntryForm(assignedSeats, groupMembers) {
-    // Only include checked-in group members in the dropdown
-    const checkedInMembers = (groupMembers || []).filter(m => m.check_in_status === 'Checked In');
-    window.selectedCheckInPassengers = assignedSeats.map(p => p.passenger_id);
-    document.querySelector('.card .card-title').textContent = 'Baggage Check-In for Selected Passengers';
+    // Get all checked-in passengers for the current booking
+    const checkedInPassengers = (window.lastBookingPassengers || []).filter(p => p.check_in_status === 'Checked In');
     const container = document.getElementById('baggage_items_container');
     container.innerHTML = '';
 
-    assignedSeats.forEach(() => {
+    // Create dropdown for checked-in passengers
+    let dropdownHtml = `<label style="font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem; display: block;">Select Checked-In Passenger</label>`;
+    dropdownHtml += `<select id="baggagePassengerSelect" class="form-select" style="margin-bottom: 1rem;">`;
+    checkedInPassengers.forEach(p => {
+        dropdownHtml += `<option value="${p.passenger_id}" data-passport="${p.passport_number}">${p.passenger_name} (${p.passport_number})</option>`;
+    });
+    dropdownHtml += `</select>`;
+    container.innerHTML = dropdownHtml;
+
+    // Add baggage entry fields for the selected passenger
+    function renderBaggageFields(selectedPassenger) {
+        let baggageFields = document.getElementById('baggageFields');
+        if (baggageFields) baggageFields.remove();
+        if (!selectedPassenger) return;
         const div = document.createElement('div');
+        div.id = 'baggageFields';
         div.className = 'baggage-item';
         div.style = 'border: 1px solid #e5e7eb; border-radius: 8px; padding: 1rem; margin-bottom: 1rem;';
         div.innerHTML = `
             <div style="display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 1rem; align-items: end;">
-            <div>
+                <div>
                     <label style="font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem; display: block;">Weight (kg)</label>
                     <input type="number" step="0.1" class="form-input" name="baggage_weights[]" placeholder="Weight" required style="margin: 0;">
-            </div>
+                </div>
                 <div>
                     <label style="font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem; display: block;">Passport Number</label>
-                    <input type="text" class="form-input" name="baggage_passenger_ids[]" placeholder="Enter passport number" style="margin: 0;">
+                    <input type="text" class="form-input" value="${selectedPassenger.passport_number}" readonly style="margin: 0;">
+                    <input type="hidden" name="baggage_passenger_ids[]" value="${selectedPassenger.passenger_id}">
                 </div>
                 <div>
                     <label style="font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem; display: block;">Special Handling</label>
@@ -1640,18 +1666,26 @@ function showBaggageEntryForm(assignedSeats, groupMembers) {
             </div>
         `;
         container.appendChild(div);
-    });
+    }
+
+    // Initial render for the first checked-in passenger
+    if (checkedInPassengers.length > 0) {
+        renderBaggageFields(checkedInPassengers[0]);
+    }
+
+    // Update baggage fields when a new passenger is selected
+    const select = document.getElementById('baggagePassengerSelect');
+    if (select) {
+        select.addEventListener('change', function() {
+            const selectedId = this.value;
+            const selectedPassenger = checkedInPassengers.find(p => p.passenger_id == selectedId);
+            renderBaggageFields(selectedPassenger);
+        });
+    }
 
     document.getElementById('baggage_package').disabled = false;
     document.querySelector('button[onclick*="submitMultipleBaggageCheckIn"]').disabled = false;
-
-    // Hide the add button if you want to restrict to one baggage per passenger
     document.querySelector('button[onclick*="addBaggageItem"]').style.display = 'none';
-
-    // Hide remove buttons for pre-filled rows
-    container.querySelectorAll('.btn-secondary').forEach(btn => btn.style.display = 'none');
-
-    // Show confirm check-in button only after baggage is checked in
     let confirmBtn = document.getElementById('confirmCheckInBtn');
     if (!confirmBtn) {
         confirmBtn = document.createElement('button');
@@ -2301,8 +2335,25 @@ function submitBatchCheckIn(event) {
             if (data.assignedSeats && data.assignedSeats.length > 0) {
                 renderSeatAssignmentSummary(data.assignedSeats, {});
                 // Show baggage entry form for these passengers, pass group members for dropdown
-                showBaggageEntryForm(data.assignedSeats, window.lastBookingPassengers);
-                // Store seat assignment summary globally for summary modal
+                // Instead of using old window.lastBookingPassengers, re-fetch booking data to update checked-in statuses
+                const bookingIdInput = document.getElementById('booking_id');
+                const bookingId = bookingIdInput ? bookingIdInput.value.trim() : '';
+                if (bookingId) {
+                    const formData = new FormData();
+                    formData.append('search_booking', '1');
+                    formData.append('booking_id', bookingId);
+                    fetch('StaffUI.php', {
+                        method: 'POST',
+                        body: formData
+                    })
+                    .then(response => response.json())
+                    .then(searchData => {
+                        window.lastBookingPassengers = searchData.passengers || [];
+                        showBaggageEntryForm(data.assignedSeats, window.lastBookingPassengers);
+                    });
+                } else {
+                    showBaggageEntryForm(data.assignedSeats, window.lastBookingPassengers);
+                }
                 window.seatAssignmentSummary = data.assignedSeats;
             }
             // Disable confirm check-in button until baggage is checked in
