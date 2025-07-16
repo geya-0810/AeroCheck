@@ -62,4 +62,31 @@ abstract class CheckInSystem
             'timestamp' => date('Y-m-d H:i:s')
         ];
     }
+
+    public function createBoardingPass(Passenger $passenger, Flight $flight, string $seatNumber): BoardingPass
+    {
+        $boardingPass = new BoardingPass(
+            $passenger->getName(),
+            $seatNumber,
+            $flight,
+            new \DateTime()
+        );
+        // QR码已在BoardingPass构造函数自动生成
+        $this->dbManager->saveBoardingPass($boardingPass, $passenger->getPassengerId(), $flight->getFlightNumber());
+        return $boardingPass;
+    }
+
+    public function createBaggage(
+        string $passengerId,
+        string $bookingId,
+        float $weight,
+        ?string $packageId = null,
+        ?string $specialHandling = null
+    ): Baggage {
+        $baggageId = "BAG_" . $passengerId . "_" . time() . "_" . rand(1000, 9999);
+        $baggage = new Baggage($baggageId, $passengerId, $weight);
+        $baggage->checkInBaggage(); // 自动生成baggage tag和设置状态
+        $this->dbManager->saveBaggage($baggage, $bookingId);
+        return $baggage;
+    }
 }

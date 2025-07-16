@@ -42,7 +42,7 @@ class DatabaseManager
                 '' // email_address - empty for now
             ]);
         } catch (PDOException $e) {
-            echo "Error saving passenger: " . $e->getMessage() . "\n";
+            error_log("Error saving passenger: " . $e->getMessage());
             return false;
         }
     }
@@ -80,7 +80,7 @@ class DatabaseManager
                 $details['status']
             ]);
         } catch (PDOException $e) {
-            echo "Error saving flight: " . $e->getMessage() . "\n";
+            error_log("Error saving flight: " . $e->getMessage());
             return false;
         }
     }
@@ -126,7 +126,7 @@ class DatabaseManager
                 date('Y-m-d H:i:s')
             ]);
         } catch (PDOException $e) {
-            echo "Error saving boarding pass: " . $e->getMessage() . "\n";
+            error_log("Error saving boarding pass: " . $e->getMessage());
             return false;
         }
     }
@@ -139,13 +139,19 @@ class DatabaseManager
             $this->connection->beginTransaction();
             
             $details = $group->getGroupDetails();
+            
+            // Note: The groups table only has group_id and booking_id
+            // We need to get booking_id from somewhere or create a placeholder
+            // For now, we'll use a placeholder booking_id
+            $bookingId = 'BK_' . $details['groupId'];
+            
             $stmt = $this->connection->prepare(
-                "INSERT INTO groups (group_id, representative_id) VALUES (?, ?)
-                 ON DUPLICATE KEY UPDATE representative_id = VALUES(representative_id)"
+                "INSERT INTO groups (group_id, booking_id) VALUES (?, ?)
+                 ON DUPLICATE KEY UPDATE booking_id = VALUES(booking_id)"
             );
             $stmt->execute([
                 $details['groupId'],
-                $group->getRepresentative()->getPassengerId()
+                $bookingId
             ]);
             
             // Clear existing members
@@ -167,25 +173,18 @@ class DatabaseManager
             return true;
         } catch (PDOException $e) {
             $this->connection->rollback();
-            echo "Error saving group: " . $e->getMessage() . "\n";
+            error_log("Error saving group: " . $e->getMessage());
             return false;
         }
     }
     
     // --- Baggage operations ---
     
-    public function saveBaggage(Baggage $baggage): bool
+    public function saveBaggage(Baggage $baggage, string $bookingId): bool
     {
         try {
             $tracking = $baggage->getTrackingInfo();
             $passengerId = $this->extractPassengerIdFromBaggage($baggage);
-            
-            // Get a booking_id for this passenger (create one if needed)
-            $stmt = $this->connection->prepare("SELECT booking_id FROM boarding_passes WHERE passenger_id = ? LIMIT 1");
-            $stmt->execute([$passengerId]);
-            $booking = $stmt->fetch(PDO::FETCH_ASSOC);
-            $bookingId = $booking ? $booking['booking_id'] : 'BK' . uniqid();
-            
             $stmt = $this->connection->prepare(
                 "INSERT INTO baggage (baggage_id, passenger_id, booking_id, weight_kg, baggage_tag, screening_status) 
                  VALUES (?, ?, ?, ?, ?, ?)
@@ -201,7 +200,7 @@ class DatabaseManager
                 $tracking['screeningStatus']
             ]);
         } catch (PDOException $e) {
-            echo "Error saving baggage: " . $e->getMessage() . "\n";
+            error_log("Error saving baggage: " . $e->getMessage());
             return false;
         }
     }
@@ -225,7 +224,7 @@ class DatabaseManager
                 $details['status']
             ]);
         } catch (PDOException $e) {
-            echo "Error saving assistance details: " . $e->getMessage() . "\n";
+            error_log("Error saving assistance details: " . $e->getMessage());
             return false;
         }
     }
@@ -245,7 +244,7 @@ class DatabaseManager
                 $this->extractStaffRole($staff)
             ]);
         } catch (PDOException $e) {
-            echo "Error saving staff: " . $e->getMessage() . "\n";
+            error_log("Error saving staff: " . $e->getMessage());
             return false;
         }
     }
@@ -303,7 +302,7 @@ class DatabaseManager
             );
             return $stmt->execute([$passengerId, $flightNumber, $message]);
         } catch (PDOException $e) {
-            echo "Error saving flight notification: " . $e->getMessage() . "\n";
+            error_log("Error saving flight notification: " . $e->getMessage());
             return false;
         }
     }
@@ -316,7 +315,7 @@ class DatabaseManager
             $stmt = $this->connection->query("SELECT * FROM passengers");
             return $stmt->fetchAll(PDO::FETCH_ASSOC);
         } catch (PDOException $e) {
-            echo "Error retrieving passengers: " . $e->getMessage() . "\n";
+            error_log("Error retrieving passengers: " . $e->getMessage());
             return [];
         }
     }

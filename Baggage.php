@@ -24,7 +24,7 @@ class Baggage
     {
         $this->baggageTag = $this->generateBaggageTag();
         $this->screeningStatus = 'Checked In';
-        echo "Baggage {$this->baggageId} checked in for passenger {$this->passengerId} with tag {$this->baggageTag}.\n";
+        error_log("Baggage {$this->baggageId} checked in for passenger {$this->passengerId} with tag {$this->baggageTag}.");
     }
 
     /**
@@ -34,7 +34,7 @@ class Baggage
     public function updateScreeningStatus(string $status): void
     {
         $this->screeningStatus = $status;
-        echo "Baggage {$this->baggageId} screening status updated to: {$status}\n";
+        error_log("Baggage {$this->baggageId} screening status updated to: {$status}");
     }
 
     /**

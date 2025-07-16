@@ -28,19 +28,52 @@ class SelfServiceKiosk extends CheckInSystem
     }
 
     // 自助值机专用方法
-    public function findBooking(string $bookingRef, string $lastName): ?array
-    {
-        $booking = new Booking($bookingRef);
-        if ($booking->findBooking($lastName)) {
+    public function findBooking($booking_ref = '', $last_name = '', $passport_number = '') {
+        // passport_number优先
+        if ($passport_number) {
+            $conn = $this->dbManager;
+            $pdo = (new \ReflectionClass($conn))->getProperty('connection');
+            $pdo->setAccessible(true);
+            $pdo = $pdo->getValue($conn);
+            // 1. 先查passenger表拿到passenger_id
+            $stmt = $pdo->prepare("SELECT * FROM passengers WHERE passport_number = ?");
+            $stmt->execute([$passport_number]);
+            $passenger = $stmt->fetch(PDO::FETCH_ASSOC);
+            if ($passenger && !empty($passenger['passenger_id'])) {
+                // 2. 再查booking_passengers表拿到booking_id
+                $stmt2 = $pdo->prepare("SELECT booking_id FROM booking_passengers WHERE passenger_id = ? LIMIT 1");
+                $stmt2->execute([$passenger['passenger_id']]);
+                $bp = $stmt2->fetch(PDO::FETCH_ASSOC);
+                if ($bp && !empty($bp['booking_id'])) {
+                    $booking = new Booking($bp['booking_id']);
+                    // 手动查bookings表并设置bookingData
+                    $stmt3 = $pdo->prepare("SELECT * FROM bookings WHERE booking_id = ?");
+                    $stmt3->execute([$bp['booking_id']]);
+                    $bookingData = $stmt3->fetch(PDO::FETCH_ASSOC);
+                    if ($bookingData) {
+                        $ref = new \ReflectionClass($booking);
+                        $prop = $ref->getProperty('bookingData');
+                        $prop->setAccessible(true);
+                        $prop->setValue($booking, $bookingData);
+                    }
+                    return [
+                        'booking' => $booking->getBookingData(),
+                        'passengers' => $booking->getPassengers(),
+                        'flight' => $booking->getFlight()
+                    ];
+                }
+            }
+        } else if ($booking_ref && $last_name) {
+            $booking = new Booking($booking_ref);
+            if ($booking->findBooking($last_name)) {
             return [
                 'booking' => $booking->getBookingData(),
                 'passengers' => $booking->getPassengers(),
-                'flight' => $booking->getFlight(),
-                'availableSeats' => $booking->getAvailableSeats(),
-                'baggagePackages' => $booking->getBaggagePackages()
+                    'flight' => $booking->getFlight()
             ];
+            }
         }
-        return null;
+        return false;
     }
 
     public function getAvailableSeats(string $flightNumber): array
@@ -83,7 +116,9 @@ class SelfServiceKiosk extends CheckInSystem
             $stmt->execute([$bookingRef]);
             $flightNumber = $stmt->fetchColumn();
             
-            foreach ($selectedPassengers as $passengerId) {
+            foreach (
+                $selectedPassengers as $passengerId
+            ) {
                 $seatNumber = $passengerSeats[$passengerId] ?? null;
                 if ($seatNumber) {
                     // 查找seat_id
@@ -114,7 +149,11 @@ class SelfServiceKiosk extends CheckInSystem
                     }
                     
                     // Create boarding pass
-                    $this->createBoardingPass($pdo, $passengerId, $bookingRef, $seatNumber);
+                    $passengerObj = Passenger::loadFromDatabase($passengerId);
+                    $flightObj = $this->getPassengerFlight($passengerId, $flightNumber);
+                    if ($passengerObj && $flightObj) {
+                        $this->createBoardingPass($passengerObj, $flightObj, $seatNumber);
+                    }
                 }
             }
             
@@ -149,39 +188,13 @@ class SelfServiceKiosk extends CheckInSystem
         }
     }
 
-    private function createBoardingPass($pdo, string $passengerId, string $bookingRef, string $seatNumber): void
-    {
-        $stmt = $pdo->prepare("SELECT flight_number FROM bookings WHERE booking_id = ?");
-        $stmt->execute([$bookingRef]);
-        $flightNumber = $stmt->fetchColumn();
-        $qrCode = "BP_" . $passengerId . "_" . $bookingRef . "_" . time();
-        $stmt = $pdo->prepare("
-            INSERT INTO boarding_passes (passenger_id, flight_number, booking_id, seat_number, qr_code, issue_datetime)
-            VALUES (?, ?, ?, ?, ?, NOW())
-        ");
-        $stmt->execute([$passengerId, $flightNumber, $bookingRef, $seatNumber, $qrCode]);
-    }
-
     private function processBaggageForSelfCheckIn($pdo, string $passengerId, string $bookingRef, array $baggageInfo): void
     {
         $weight = floatval($baggageInfo['weight'] ?? 0);
         if ($weight > 0) {
-            $baggageId = "BAG_" . $passengerId . "_" . time() . "_" . rand(1000, 9999);
-            $baggageTag = "BT" . substr($passengerId, 0, 4) . strtoupper(uniqid());
-            // $baggageTag = "TAG_" . $passengerId . "_" . time();
-            $stmt = $pdo->prepare("
-                INSERT INTO baggage (baggage_id, passenger_id, booking_id, weight_kg, baggage_tag, screening_status, package_id, special_handling)
-                VALUES (?, ?, ?, ?, ?, 'Pending', ?, ?)
-            ");
-            $stmt->execute([
-                $baggageId,
-                $passengerId,
-                $bookingRef,
-                $weight,
-                $baggageTag,
-                $baggageInfo['packageId'] !== '' ? $baggageInfo['packageId'] : null,
-                $baggageInfo['special_handling'] ?? null
-            ]);
+            $packageId = $baggageInfo['packageId'] ?? null;
+            $specialHandling = $baggageInfo['special_handling'] ?? null;
+            $this->createBaggage($passengerId, $bookingRef, $weight, $packageId, $specialHandling);
         }
     }
 
@@ -196,5 +209,26 @@ class SelfServiceKiosk extends CheckInSystem
             ");
             $stmt->execute([$assistanceId, $passengerId, $needType, $description]);
         }
+    }
+
+    // 辅助方法：通过flightNumber获取Flight对象
+    private function getPassengerFlight(string $passengerId, string $flightNumber): ?Flight
+    {
+        $flightData = $this->getFlightInfo($flightNumber);
+        if ($flightData) {
+            // departure_time需为DateTime对象
+            $departureTime = $flightData['departure_time'] instanceof DateTime
+                ? $flightData['departure_time']
+                : new DateTime($flightData['departure_time']);
+            return new Flight(
+                $flightData['flight_number'],
+                $departureTime,
+                $flightData['destination'],
+                $flightData['gate'],
+                $flightData['status'],
+                $flightData['capacity']
+            );
+        }
+        return null;
     }
 }
