@@ -121,7 +121,7 @@ CREATE TABLE IF NOT EXISTS `baggage` (
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (`passenger_id`) REFERENCES `passengers`(`passenger_id`) ON DELETE CASCADE,
     FOREIGN KEY (`booking_id`) REFERENCES `bookings`(`booking_id`) ON DELETE CASCADE,
-    FOREIGN KEY (`package_id`) REFERENCES `baggage_packages`(`package_id`) ON DELETE SET NULL;
+    FOREIGN KEY (`package_id`) REFERENCES `baggage_packages`(`package_id`) ON DELETE SET NULL
 );
 
 -- Assistance details table
